@@ -158,3 +158,4 @@ for f in factor_name_excluding_industry_country[5:6]:
     #plt.tick_params(axis='x', labelsize=1) # 调整x轴标签字体大小，但不知为何，此处依然没有作用
     fig.legend(loc=1, bbox_to_anchor=(0,-0.2), bbox_transform=ax.transAxes)
     plt.show()
+
