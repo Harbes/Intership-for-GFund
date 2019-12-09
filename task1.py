@@ -80,7 +80,7 @@ factor_name_sql+=factor_name_excluding_industry_country[-1]
 sql_get_asset_exposure= 'select SECUCODE,TRADINGDATE,' + factor_name_sql + ' from barra_assetexposure where TRADINGDATE BETWEEN ' + start_date + ' and ' + end_date
 asset_exposure=pd.read_sql(sql_get_asset_exposure, connect_barra_risk).set_index(['TRADINGDATE', 'SECUCODE']).sort_index()
 asset_exposure=asset_exposure.loc[~asset_exposure.index.duplicated(keep='last')] # 删除重复数据
-#asset_exposure.loc['20180801']
+
 
 # todo 计算benchmark相关
 ## 设置常用的benchmark；注意hs300free里有许多不同的编制，是否需要纳入？
@@ -113,11 +113,6 @@ factor_excess_return=factor_excess_exposure*factor_return
 
 # todo 收益率分解
 # 读取组合数据
-portfolio_stock[['PORT_CODE','T_DATE','I_CODE','H_COUNT','POSITION','H_COST','H_PORT_COST']].head()
-sql_get_from_xrisk="SELECT PORT_CODE,T_DATE,I_CODE,H_COUNT,POSITION,H_COST,H_PORT_COST from xrisk.trcp_hld WHERE (T_DATE BETWEEN "+str(start_date)+" AND "+str(end_date)+")and (A_TYPE= 'SPT_S')"
-portfolio_stock_source_date=pd.read_sql(sql_get_from_xrisk,connect_xrisk).set_index(['PORT_CODE','T_DATE','I_CODE']).sort_index()
-portfolio_stock_set=set(portfolio_stock_source_date.index.get_level_values(0)) # 数据库中有哪些组合
-
 portfolio_type={'FUT_BD',
                 'FUT_CMDT',
                 'FUT_IDX_S',
@@ -134,12 +129,19 @@ portfolio_type={'FUT_BD',
                 'SPT_REPO',
                 'SPT_S',
                 'SPT_TMD'}
+sql_get_from_xrisk="SELECT PORT_CODE,T_DATE,I_CODE,H_COUNT,POSITION,H_COST,H_PORT_COST from xrisk.trcp_hld WHERE (T_DATE BETWEEN "+str(start_date)+" AND "+str(end_date)+")and (A_TYPE= 'SPT_S')"
+portfolio_stock_source_date=pd.read_sql(sql_get_from_xrisk,connect_xrisk).set_index(['PORT_CODE','T_DATE','I_CODE']).sort_index()
+portfolio_stock_set=set(portfolio_stock_source_date.index.get_level_values(0)) # 数据库中有哪些组合
+
 
 xrisk=pd.read_pickle('C:/Users/shenzheng/PycharmProjects/Intership-for-GFund/DataSets/trcp_hld')
 xrisk['T_DATE']=pd.to_datetime(xrisk['T_DATE'],format='%Y-%m-%d')
-portfolio_stock=xrisk[['PORT_CODE','T_DATE','I_CODE','H_COUNT','POSITION','H_COST','H_PORT_COST','UPDATE_TIME']].loc[xrisk['A_TYPE']=='SPT_S']
-portfolio_stock=portfolio_stock.set_index(['PORT_CODE','T_DATE','I_CODE']).sort_index()
-portfolio_stock.loc[portfolio_stock.index.duplicated(keep=False)].head()
+portfolio_stock=xrisk[['PORT_CODE','T_DATE','I_CODE','H_EVAL']].loc[xrisk['A_TYPE']=='SPT_S'] # 'PORT_CODE','T_DATE','I_CODE','H_COUNT','POSITION','H_COST','H_EVAL','UPDATE_TIME'
+portfolio_code=set(portfolio_stock['PORT_CODE'])
+portfolio_stock=portfolio_stock.set_index(['T_DATE','PORT_CODE','I_CODE']).sort_index().groupby(level=(0,1,2)).sum()
+# portfolio_stock.loc[portfolio_stock.index.duplicated(keep=False)]# 组合'762001'有三条数据出现重复--->似乎应该相加
+portfolio_stock.loc[(slice(None),slice(None),'600519')]
+
 
 
 portfolio_stock_weights=(portfolio_stock['H_COUNT']*portfolio_stock['H_COST']).groupby(level=(0,1)).apply(lambda x:x/x.sum())
