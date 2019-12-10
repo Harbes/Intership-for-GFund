@@ -6,7 +6,7 @@ import pandas as pd
 import cx_Oracle
 import pymysql
 import matplotlib.pyplot as plt
-
+import datetime
 
 # todo 链接数据库
 def ConnectOracle(user,password,dsn):
@@ -28,7 +28,11 @@ def ConnectOracle(user,password,dsn):
 options_barra_database={'user':'riskdata',
                    'password':'riskdata',
                    'dsn':cx_Oracle.makedsn('172.16.100.188','1522','markdb')}
-connect_barra_risk=ConnectOracle(**options_barra_database)
+connect_barra=ConnectOracle(**options_barra_database)
+options_xrisk_database={'user':'risk_read',
+                   'password':'riskRead2019',
+                   'dsn':cx_Oracle.makedsn('172.16.100.230','1521','xrisk')}
+connect_xrisk=ConnectOracle(**options_xrisk_database)
 def ConnectMySQL(server,user,password,database):
     '''
     范例：
@@ -46,7 +50,7 @@ options_barra_mysql={'server':'localhost',
                       'user':'root',
                       'password':'1234567890',
                       'database':'barra_risk'}
-connect_barra_risk=ConnectMySQL(**options_barra_mysql)
+connect_barra=ConnectMySQL(**options_barra_mysql)
 options_winddb_mysql={'server':'localhost',
                      'user':'root',
                      'password':'1234567890',
@@ -59,18 +63,18 @@ options_xrisk_mysql={'server':'localhost',
 connect_xrisk=ConnectMySQL(**options_xrisk_mysql)
 
 
-# todo 读取某段时间内的factor return数据
+# todo 从barra数据库读取某段时间内的factor return数据
 # 为形成 T*K 维度的DataFrame，要同时保留barra_factorret表中的TRADINGDATE,FACTOR,DLYRETURN
 factor_name_excluding_industry_country=('CNE5S_BETA', 'CNE5S_BTOP', 'CNE5S_EARNYILD', 'CNE5S_GROWTH', 'CNE5S_LEVERAGE', 'CNE5S_LIQUIDTY',
                                   'CNE5S_MOMENTUM','CNE5S_RESVOL','CNE5S_SIZE','CNE5S_SIZENL')
 start_date,end_date=' 20180701','20180730'
 sql_get_factor_returns= 'select TRADINGDATE,FACTOR,DLYRETURN from BARRA_FACTORRET where TRADINGDATE BETWEEN ' + \
                         start_date +' and ' + end_date + ' and Factor in ' + str(factor_name_excluding_industry_country)
-factor_return=pd.read_sql(sql_get_factor_returns, connect_barra_risk).set_index(['TRADINGDATE', 'FACTOR']).sort_index().unstack()
+factor_return=pd.read_sql(sql_get_factor_returns, connect_barra).set_index(['TRADINGDATE', 'FACTOR']).sort_index().unstack()
 factor_return.columns=factor_return.columns.droplevel()
 
 
-# todo 读取某段时间内的asset exposure数据
+# todo 从barra数据库读取某段时间内的asset exposure数据
 ## 注意 asset_exposure中，股票代码没有SH、SZ之类的后缀
 #以下命令用于生成sql命令中 紧跟select的列名（字符串）
 factor_name_sql= ''
@@ -78,11 +82,11 @@ for i in factor_name_excluding_industry_country[:-1]:
     factor_name_sql= factor_name_sql + i + ','
 factor_name_sql+=factor_name_excluding_industry_country[-1]
 sql_get_asset_exposure= 'select SECUCODE,TRADINGDATE,' + factor_name_sql + ' from barra_assetexposure where TRADINGDATE BETWEEN ' + start_date + ' and ' + end_date
-asset_exposure=pd.read_sql(sql_get_asset_exposure, connect_barra_risk).set_index(['TRADINGDATE', 'SECUCODE']).sort_index()
+asset_exposure=pd.read_sql(sql_get_asset_exposure, connect_barra).set_index(['TRADINGDATE', 'SECUCODE']).sort_index()
 asset_exposure=asset_exposure.loc[~asset_exposure.index.duplicated(keep='last')] # 删除重复数据
 
 
-# todo 计算benchmark相关
+# todo 从wind数据库读取并计算benchmark相关
 ## 设置常用的benchmark；注意hs300free里有许多不同的编制，是否需要纳入？
 benchmark_set={'HS300':('i_weight','aindexhs300closeweight'),
                'CSI500':('weight','AIndexCSI500Weight'),
@@ -111,8 +115,8 @@ market_exposure=PortfolioExposure(asset_exposure)
 factor_excess_exposure=market_exposure-benchmark_exposure
 factor_excess_return=factor_excess_exposure*factor_return
 
-# todo 收益率分解
-# 读取组合数据
+# todo 从xrisk读取现实组合数据
+#
 portfolio_type={'FUT_BD',
                 'FUT_CMDT',
                 'FUT_IDX_S',
@@ -129,23 +133,24 @@ portfolio_type={'FUT_BD',
                 'SPT_REPO',
                 'SPT_S',
                 'SPT_TMD'}
-sql_get_from_xrisk="SELECT PORT_CODE,T_DATE,I_CODE,H_COUNT,POSITION,H_COST,H_PORT_COST from xrisk.trcp_hld WHERE (T_DATE BETWEEN "+str(start_date)+" AND "+str(end_date)+")and (A_TYPE= 'SPT_S')"
-portfolio_stock_source_date=pd.read_sql(sql_get_from_xrisk,connect_xrisk).set_index(['PORT_CODE','T_DATE','I_CODE']).sort_index()
-portfolio_stock_set=set(portfolio_stock_source_date.index.get_level_values(0)) # 数据库中有哪些组合
+# 有些组合出现了衍生工具，例如：76C012
+def DatetimeFromBarraToXrisk(date):
+    return datetime.datetime.strptime(str.strip(date),'%Y%m%d').strftime('%Y-%m-%d')
+sql_get_from_xrisk="SELECT PORT_CODE,T_DATE,I_CODE,H_EVAL from xrisk.tcrp_hld WHERE (T_DATE BETWEEN '"+DatetimeFromBarraToXrisk(start_date)+"' AND '"+DatetimeFromBarraToXrisk(end_date)+"') and (A_TYPE= 'SPT_S')"
+portfolio_stock=pd.read_sql(sql_get_from_xrisk, connect_xrisk).set_index(['T_DATE', 'PORT_CODE', 'I_CODE']).sort_index().groupby(level=(0,1,2)).sum() # 使用groupby+sum是因为数据中出现了“分裂”的情况
+portfolio_weights=portfolio_stock.unstack().apply(lambda x:x/x.sum(),axis=1)
+portfolio_weights.columns=portfolio_weights.columns.droplevel()
+portfolio_code=set(portfolio_stock.index.get_level_values(1)) # 数据库中有哪些组合
+portfolio_trade_dt=set(portfolio_stock.index.get_level_values(0)) # 交易日期
 
 
-xrisk=pd.read_pickle('C:/Users/shenzheng/PycharmProjects/Intership-for-GFund/DataSets/trcp_hld')
-xrisk['T_DATE']=pd.to_datetime(xrisk['T_DATE'],format='%Y-%m-%d')
-portfolio_stock=xrisk[['PORT_CODE','T_DATE','I_CODE','H_EVAL']].loc[xrisk['A_TYPE']=='SPT_S'] # 'PORT_CODE','T_DATE','I_CODE','H_COUNT','POSITION','H_COST','H_EVAL','UPDATE_TIME'
-portfolio_code=set(portfolio_stock['PORT_CODE'])
-portfolio_stock=portfolio_stock.set_index(['T_DATE','PORT_CODE','I_CODE']).sort_index().groupby(level=(0,1,2)).sum()
-# portfolio_stock.loc[portfolio_stock.index.duplicated(keep=False)]# 组合'762001'有三条数据出现重复--->似乎应该相加
-portfolio_stock.loc[(slice(None),slice(None),'600519')]
+# todo 收益、风险分解
+def DecomReturn(weights,asset_exposure,factor_return,specific_return):
+    style_return=weights*asset_exposure*factor_return
 
+portfolio_weights.loc[('2018-07-30', '76C012', slice(None))]
+asset_exposure.head()
 
-
-portfolio_stock_weights=(portfolio_stock['H_COUNT']*portfolio_stock['H_COST']).groupby(level=(0,1)).apply(lambda x:x/x.sum())
-portfolio_stock.loc[portfolio_stock.index.duplicated(keep=False)].head(20) # todo 出现重复值？为什么
 
 # todo 绘图
 # 图形bug太多
