@@ -178,11 +178,9 @@ connect_winddb=ConnectSQLserver(**options_winddb_datebase)
 
 # todo 如果没有时间限制？--在组合分析时常用
 start_date,end_date=' 20180701','20180730' # 全局变量，控制所有输入数据
-#options={'start_date':'20180701',
-#         'end_date':'20180730',
-#         'factors':'all',
-#         'benchmark':'HS300',
-#         'port_code':None}
+factors='all' # 'style','others'
+benchmark='HS300' #
+port_code=None # '76C012'或者['76C012','76C012']
 
 
 
@@ -216,7 +214,7 @@ excess_portfolio_return=excess_portfolio_exposure.mul(factor_returns.values,axis
 portfolio_factor_return=portfolio_exposure.reindex(factor_returns.index).mul(factor_returns,axis=0).groupby(level=0).sum()
 portfolio_specific_return=portfolio_weights.reindex(specific_returns.index).mul(specific_returns,axis=0).groupby(level=0).sum()
 
-#todo  组合风险分解,根据portfolio_factor_return和portfolio_specific_return计算，前提是二者在时序上不相关
+# todo  组合风险分解,根据portfolio_factor_return和portfolio_specific_return计算，前提是二者在时序上不相关
 
 
 
