@@ -60,7 +60,7 @@ options_xrisk_mysql={'server':'localhost',
                       'user':'root',
                       'password':'1234567890',
                       'database':'xrisk'}
-connect_xrisk=ConnectMySQL(**options_xrisk_mysql)
+# connect_xrisk=ConnectMySQL(**options_xrisk_mysql)
 
 
 # todo 从barra数据库读取某段时间内的factor return数据
@@ -88,12 +88,12 @@ asset_exposure=asset_exposure.loc[~asset_exposure.index.duplicated(keep='last')]
 
 # todo 从wind数据库读取并计算benchmark相关
 ## 设置常用的benchmark；注意hs300free里有许多不同的编制，是否需要纳入？
-benchmark_set={'HS300':('i_weight','aindexhs300closeweight'),
-               'CSI500':('weight','AIndexCSI500Weight'),
-               'SSE50':('weight','AIndexSSE50Weight') # 上证50只有20180830之前的数据
-               }
+
 def GetBenchmarkWeightsFromWindDB(benchmark='HS300'):
-    #benchmark='SSE50'
+    benchmark_set = {'HS300': ('i_weight', 'aindexhs300closeweight'),
+                     'CSI500': ('weight', 'AIndexCSI500Weight'),
+                     'SSE50': ('weight', 'AIndexSSE50Weight')  # 上证50只有20180830之前的数据
+                     }
     sql_get_benchmark_weights='select trade_dt,s_con_windcode,'+benchmark_set[benchmark][0] +' from '+benchmark_set[benchmark][1] +' where trade_dt BETWEEN ' + start_date + ' and ' + end_date
     weights=pd.read_sql(sql_get_benchmark_weights,connect_winddb)
     ## 注意：由于Barra数据库中股票代码没有SH之类的后缀，因此，来自winddb的股票代码需要去除后缀
@@ -142,6 +142,10 @@ portfolio_weights=portfolio_stock.unstack().apply(lambda x:x/x.sum(),axis=1)
 portfolio_weights.columns=portfolio_weights.columns.droplevel()
 portfolio_code=set(portfolio_stock.index.get_level_values(1)) # 数据库中有哪些组合
 portfolio_trade_dt=set(portfolio_stock.index.get_level_values(0)) # 交易日期
+
+
+
+
 
 
 # todo 收益、风险分解
