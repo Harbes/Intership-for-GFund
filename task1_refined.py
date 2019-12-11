@@ -9,6 +9,7 @@ import pandas as pd
 import numpy as np
 import cx_Oracle
 import pymssql
+import pymysql
 import matplotlib.pyplot as plt
 import datetime
 
@@ -87,19 +88,26 @@ def GetFactorReturnsFromBarra(factors='all'):
     factor_returns['TRADINGDATE']=pd.to_datetime(factor_returns['TRADINGDATE'],format='%Y%m%d')
     factor_returns=factor_returns.set_index(['TRADINGDATE', 'FACTOR']).sort_index()
     #factor_returns.columns = factor_returns.columns.droplevel()
-    return factor_returns['DLYRETURN']
+    return factor_returns['DLYRETURN']*100.0
 def GetFactorCovarianceFromBarra(factors='all'):
-    # todo 填充np.nan数据
     factor_list = GenerateFactorNamesCombination(factors=factors)
     sql_get_factor_covariance = 'select TRADINGDATE,FACTOR1,FACTOR2,COVARIANCE from BARRA_FACTORCOV where TRADINGDATE BETWEEN ' + \
                              start_date + ' and ' + end_date + ' and Factor1 in ' + str(tuple(factor_list))+' and (Factor2 in '+str(tuple(factor_list))+')'
     factor_covariance = pd.read_sql(sql_get_factor_covariance, connect_barra)
     factor_covariance['TRADINGDATE'] = pd.to_datetime(factor_covariance['TRADINGDATE'], format='%Y%m%d')
-    factor_covariance = factor_covariance.set_index(['TRADINGDATE', 'FACTOR1','FACTOR2']).sort_index().unstack()# 为什么数据会出现缺失
-    #factor_covariance.loc[~factor_covariance.index.duplicated(keep=False)].head(10)
-    #factor_covariance.unstack()
-    # factor_returns.columns = factor_returns.columns.droplevel()
+    factor_covariance = factor_covariance.set_index(['TRADINGDATE', 'FACTOR1','FACTOR2']).sort_index().unstack().fillna(0.0)
+    t_set=set(factor_covariance.index.get_level_values(0))
+    for t in t_set:
+        factor_covariance.loc[t]=factor_covariance.loc[t].values+factor_covariance.loc[t].values.T-np.diag(np.diag(factor_covariance.loc[t].values))
     return factor_covariance
+def GetAssetReturnsFromBarra():
+    sql_get_asset_returns = 'select TRADINGDATE,SECUCODE,DLYRETURN from BARRA_ASSETRET where TRADINGDATE BETWEEN ' + \
+                             start_date + ' and ' + end_date
+    asset_returns = pd.read_sql(sql_get_asset_returns, connect_barra)
+    asset_returns['TRADINGDATE']=pd.to_datetime(asset_returns['TRADINGDATE'],format='%Y%m%d')
+    asset_returns=asset_returns.set_index(['TRADINGDATE', 'SECUCODE']).sort_index()
+    asset_returns=asset_returns.loc[~asset_returns.index.duplicated(keep='last')]
+    return asset_returns['DLYRETURN']
 def GetSpecificReturnsFramBarra():
     sql_get_specific_returns = 'select TRADINGDATE,SECUCODE,SPECIFICRETURN from BARRA_SPECIFICRET where TRADINGDATE BETWEEN ' + \
                              start_date + ' and ' + end_date
@@ -107,13 +115,22 @@ def GetSpecificReturnsFramBarra():
     specific_returns['TRADINGDATE'] = pd.to_datetime(specific_returns['TRADINGDATE'], format='%Y%m%d')
     specific_returns = specific_returns.set_index(['TRADINGDATE', 'SECUCODE']).sort_index()
     return specific_returns.loc[~specific_returns.index.duplicated(keep='last'),'SPECIFICRETURN']
+def GetSpecificRiskFromBarra():
+    sql_get_specific_risk = 'select TRADINGDATE,SECUCODE,SPECIFICRISK from BARRA_SPECIFICRISK where TRADINGDATE BETWEEN ' + \
+                             start_date + ' and ' + end_date
+    specific_risk = pd.read_sql(sql_get_specific_risk, connect_barra)
+    specific_risk['TRADINGDATE'] = pd.to_datetime(specific_risk['TRADINGDATE'], format='%Y%m%d')
+    specific_risk = specific_risk.set_index(['TRADINGDATE', 'SECUCODE']).sort_index()
+    return specific_risk.loc[~specific_risk.index.duplicated(keep='last'),'SPECIFICRISK']
+
 def GetAssetExposureFromBarra(factors='all'):
     factor_names = GenerateFactorNamesCombination(list_format=False,factors=factors)
     sql_get_asset_exposure = 'select SECUCODE,TRADINGDATE,' + factor_names + ' from barra_assetexposure where TRADINGDATE BETWEEN ' + start_date + ' and ' + end_date
     asset_exposure = pd.read_sql(sql_get_asset_exposure, connect_barra)
     asset_exposure['TRADINGDATE']=pd.to_datetime(asset_exposure['TRADINGDATE'],format='%Y%m%d')
     asset_exposure=asset_exposure.set_index(['TRADINGDATE', 'SECUCODE']).sort_index()
-    asset_exposure = asset_exposure.loc[~asset_exposure.index.duplicated(keep='last')]  # 删除重复数据
+    asset_exposure =asset_exposure.loc[~asset_exposure.index.duplicated(keep='last')]  # todo 重复
+    #asset_exposure=asset_exposure.groupby(level=(0,1)).sum()
     return asset_exposure
 def GetBenchmarkWeightsFromWindDB(benchmark='HS300'):
     benchmark_set = {'HS300': ('i_weight', 'aindexhs300closeweight'),
@@ -158,7 +175,15 @@ def PortfolioExposure(asset_exposure,portfolio_weights=None):
         for p in portfolio_exposure.columns:
             portfolio_exposure[p]=(asset_exposure.mul(portfolio_weights[p].reindex(asset_exposure.index).values,axis=0).groupby(level=0).sum().div(portfolio_weights[p].reindex(asset_exposure.index).groupby(level=0).sum().values,axis=0)).stack()
         return portfolio_exposure
-
+def PortfolioFactorRisk(portfolio_exposure,factor_covariance):
+    t_set=set(portfolio_exposure.index.get_level_values(0))
+    factor_risk=pd.DataFrame(np.nan,index=t_set,columns=portfolio_exposure.columns).sort_index()
+    for t in factor_risk.index:
+        for p in factor_risk.columns:
+            factor_risk.loc[t,p]=(portfolio_exposure.loc[(t,slice(None)),p].values@factor_covariance.loc[t]).values@portfolio_exposure.loc[(t,slice(None)),p]
+    return factor_risk
+def PortfolioSpecificRisk(portfolio_weights,specific_risk):
+    return (portfolio_weights**2.0).reindex(specific_risk.index).mul(specific_risk,axis=0).groupby(level=0).sum()
 
 #if __name__ is '__main__':
 
@@ -184,12 +209,11 @@ port_code=None # '76C012'或者['76C012','76C012']
 
 
 
-
-
 # 从barra数据库读取factor return、specifict return、factor cov
 factor_returns=GetFactorReturnsFromBarra(factors='all')
 specific_returns=GetSpecificReturnsFramBarra()
-factor_covariance=GetFactorCovarianceFromBarra(factors='style')
+factor_covariance=GetFactorCovarianceFromBarra(factors='all')
+asset_returns=GetAssetReturnsFromBarra()
 # 从barra数据库读取asset exposure数据
 asset_exposure=GetAssetExposureFromBarra(factors='all')
 # 从wind数据库读取benchmark的权重数据
@@ -214,13 +238,18 @@ excess_portfolio_return=excess_portfolio_exposure.mul(factor_returns.values,axis
 portfolio_factor_return=portfolio_exposure.reindex(factor_returns.index).mul(factor_returns,axis=0).groupby(level=0).sum()
 portfolio_specific_return=portfolio_weights.reindex(specific_returns.index).mul(specific_returns,axis=0).groupby(level=0).sum()
 
-# todo  组合风险分解,根据portfolio_factor_return和portfolio_specific_return计算，前提是二者在时序上不相关
+# todo  组合风险分解[倒推？？？]
+# todo 组合收益率出现0？？？
+portfolio_weights.loc[('2018-07-11',slice(None)),'002155'].dropna() # 结果： 601390
+asset_returns.loc[('2018-07-11','601390')] # 结果0.0
 
 
+portfolio_returns=portfolio_weights.reindex(asset_returns.index).mul(asset_returns,axis=0).groupby(level=0).sum().replace(0.0,np.nan)
+#portfolio_returns-portfolio_factor_return-portfolio_specific_return # todo 存在误差？？？ 已知factor_return*100.0
+
+portfolio_risk=portfolio_returns**2.0 # todo 组合收益率为0？
+portfolio_factor_risk=PortfolioFactorRisk(portfolio_exposure,factor_covariance) # todo 量级感觉不对
+portfolio_specific_risk=PortfolioSpecificRisk(portfolio_weights,specific_risk) # todo 量级不对
 
 
-
-
-
-
-
+portfolio_risk-(portfolio_factor_risk+portfolio_specific_risk)

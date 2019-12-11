@@ -33,34 +33,7 @@ options_xrisk_database={'user':'risk_read',
                    'password':'riskRead2019',
                    'dsn':cx_Oracle.makedsn('172.16.100.230','1521','xrisk')}
 connect_xrisk=ConnectOracle(**options_xrisk_database)
-def ConnectMySQL(server,user,password,database):
-    '''
-    范例：
-    options_WindDatabase={'server':'localhost',
-                      'user':'root',
-                      'password':'123456',
-                      'database':'winddb'}
-    connect=ConnectMySQL(**options_mysql)
-    '''
-    connect=pymysql.connect(server,user,password,database)
-    if connect:
-        print('链接成功')
-    return connect
-options_barra_mysql={'server':'localhost',
-                      'user':'root',
-                      'password':'1234567890',
-                      'database':'barra_risk'}
-connect_barra=ConnectMySQL(**options_barra_mysql)
-options_winddb_mysql={'server':'localhost',
-                     'user':'root',
-                     'password':'1234567890',
-                     'database':'winddb'}
-connect_winddb=ConnectMySQL(**options_winddb_mysql)
-options_xrisk_mysql={'server':'localhost',
-                      'user':'root',
-                      'password':'1234567890',
-                      'database':'xrisk'}
-connect_xrisk=ConnectMySQL(**options_xrisk_mysql)
+
 
 
 # todo 从barra数据库读取某段时间内的factor return数据

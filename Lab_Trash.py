@@ -11,3 +11,45 @@ portfolio_stock=xrisk.loc[xrisk['A_TYPE']=='SPT_S'][['T_DATE','PORT_CODE','I_COD
 portfolio_stock.head()
 portfolio_stock.columns=portfolio_stock.columns.droplevel()
 tmp=xrisk.loc[xrisk['I_CODE']=='100201'].head()
+
+
+
+
+
+
+
+def ConnectMySQL(server,user,password,database):
+    '''
+    范例：
+    options_WindDatabase={'server':'localhost',
+                      'user':'root',
+                      'password':'123456',
+                      'database':'winddb'}
+    connect=ConnectMySQL(**options_mysql)
+    '''
+    connect=pymysql.connect(server,user,password,database)
+    if connect:
+        print('链接成功')
+    return connect
+options_barra_mysql={'server':'localhost',
+                      'user':'root',
+                      'password':'1234567890',
+                      'database':'barra_risk'}
+connect_barra=ConnectMySQL(**options_barra_mysql)
+options_winddb_mysql={'server':'localhost',
+                     'user':'root',
+                     'password':'1234567890',
+                     'database':'winddb'}
+connect_winddb=ConnectMySQL(**options_winddb_mysql)
+options_xrisk_mysql={'server':'localhost',
+                      'user':'root',
+                      'password':'1234567890',
+                      'database':'xrisk'}
+connect_xrisk=ConnectMySQL(**options_xrisk_mysql)
+
+# 用于检验个股因子结构
+t_set=set(asset_returns.index.get_level_values(0))
+sec_set=set(asset_returns.index.get_level_values(1))
+d=pd.Series(np.nan,pd.MultiIndex.from_product((t_set,sec_set))).sort_index()
+for i in d.index:
+    d.loc[i]= asset_returns.loc[i]-(asset_exposure.loc[i]*factor_returns.loc[i[0]]).sum()*100.0-specific_returns.loc[i]
