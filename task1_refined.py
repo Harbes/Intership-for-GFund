@@ -87,8 +87,9 @@ def GetFactorReturnsFromBarra(factors='all'):
     factor_returns['TRADINGDATE']=pd.to_datetime(factor_returns['TRADINGDATE'],format='%Y%m%d')
     factor_returns=factor_returns.set_index(['TRADINGDATE', 'FACTOR']).sort_index()
     #factor_returns.columns = factor_returns.columns.droplevel()
-    return factor_returns
+    return factor_returns['DLYRETURN']
 def GetFactorCovarianceFromBarra(factors='all'):
+    # todo 填充np.nan数据
     factor_list = GenerateFactorNamesCombination(factors=factors)
     sql_get_factor_covariance = 'select TRADINGDATE,FACTOR1,FACTOR2,COVARIANCE from BARRA_FACTORCOV where TRADINGDATE BETWEEN ' + \
                              start_date + ' and ' + end_date + ' and Factor1 in ' + str(tuple(factor_list))+' and (Factor2 in '+str(tuple(factor_list))+')'
@@ -105,7 +106,7 @@ def GetSpecificReturnsFramBarra():
     specific_returns = pd.read_sql(sql_get_specific_returns, connect_barra)
     specific_returns['TRADINGDATE'] = pd.to_datetime(specific_returns['TRADINGDATE'], format='%Y%m%d')
     specific_returns = specific_returns.set_index(['TRADINGDATE', 'SECUCODE']).sort_index()
-    return specific_returns.loc[~specific_returns.index.duplicated(keep='last')]
+    return specific_returns.loc[~specific_returns.index.duplicated(keep='last'),'SPECIFICRETURN']
 def GetAssetExposureFromBarra(factors='all'):
     factor_names = GenerateFactorNamesCombination(list_format=False,factors=factors)
     sql_get_asset_exposure = 'select SECUCODE,TRADINGDATE,' + factor_names + ' from barra_assetexposure where TRADINGDATE BETWEEN ' + start_date + ' and ' + end_date
@@ -127,17 +128,22 @@ def GetBenchmarkWeightsFromWindDB(benchmark='HS300'):
     weights=weights.set_index(['trade_dt','s_con_windcode']).sort_index().loc[~weights.index.duplicated(keep='last')] # 去重
     #weights.columns=weights.columns.droplevel()
     return weights
-def GetPortfolioHoldingFromXrisk(port_code=None):
+def GetPortfolioWeightsFromXrisk(port_code=None):
     # todo weights=holding*precose/sum() --- 问题：现金分红？
     # todo 添加单个组合数据的读取
     sql_get_from_xrisk = "SELECT PORT_CODE,T_DATE,I_CODE,H_COUNT from xrisk.tcrp_hld WHERE (T_DATE BETWEEN '" + DatetimeBarraToXrisk(
         start_date) + "' AND '" + DatetimeBarraToXrisk(end_date) + "') and (A_TYPE= 'SPT_S')"
+    if port_code is not None:
+        if type(port_code) is str:
+            sql_get_from_xrisk+= " and (PORT_CODE = '"+port_code+"')"
+        else:
+            sql_get_from_xrisk+=' and (PORT_CODE in '+str(tuple(port_code))+')'
     portfolio_count = pd.read_sql(sql_get_from_xrisk, connect_xrisk)
     portfolio_count['T_DATE']=pd.to_datetime(portfolio_count['T_DATE'],format='%Y-%m-%d')
     portfolio_count =portfolio_count.set_index(['T_DATE', 'I_CODE', 'PORT_CODE']).sort_index().groupby(level=(0, 1, 2)).sum().unstack()  # 使用groupby+sum是因为数据中出现了“分裂”的情况
     portfolio_count.columns = portfolio_count.columns.droplevel()
     preclose=GetPrecloseFromWindDB()
-    portfolio_weights=(portfolio_count.mul(preclose,axis=1)).groupby(level=0).apply(lambda x:x/x.sum())
+    portfolio_weights=(portfolio_count.reindex(preclose.index).mul(preclose,axis=0)).groupby(level=0).apply(lambda x:x/x.sum())
     return portfolio_weights
 # step3：计算
 def PortfolioExposure(asset_exposure,portfolio_weights=None):
@@ -172,6 +178,15 @@ connect_winddb=ConnectSQLserver(**options_winddb_datebase)
 
 # todo 如果没有时间限制？--在组合分析时常用
 start_date,end_date=' 20180701','20180730' # 全局变量，控制所有输入数据
+#options={'start_date':'20180701',
+#         'end_date':'20180730',
+#         'factors':'all',
+#         'benchmark':'HS300',
+#         'port_code':None}
+
+
+
+
 
 # 从barra数据库读取factor return、specifict return、factor cov
 factor_returns=GetFactorReturnsFromBarra(factors='all')
@@ -182,7 +197,9 @@ asset_exposure=GetAssetExposureFromBarra(factors='all')
 # 从wind数据库读取benchmark的权重数据
 benchmark_weights = GetBenchmarkWeightsFromWindDB(benchmark='HS300')
 # 从xrisk数据库读取并计算现实组合的权重数据
-portfolio_weights=GetPortfolioWeightsFromXrisk(port_code=None)
+portfolio_weights=GetPortfolioWeightsFromXrisk(port_code=None) # 例如：76C012
+#port_76=GetPortfolioWeightsFromXrisk(port_code='76C012')
+
 
 # 计算组合的因子暴露以及超额暴露、超额收益率
 market_exposure=PortfolioExposure(asset_exposure) #等权重的市场组合
@@ -192,17 +209,17 @@ excess_market_exposure= market_exposure.sub(benchmark_exposure,axis=0)
 excess_portfolio_exposure=portfolio_exposure.sub(benchmark_exposure,axis=0) # DataFrame减去Series，建议使用.sub命令
 
 #计算组合超额收益率
-excess_market_return=excess_market_exposure.mul(factor_returns['DLYRETURN'],axis=0)
+excess_market_return=excess_market_exposure.mul(factor_returns,axis=0)
 excess_portfolio_return=excess_portfolio_exposure.mul(factor_returns.values,axis=0)
 
 # 计算组合的因子收益率、特质收益率
-portfolio_factor_return=portfolio_exposure.reindex(factor_returns.index).mul(factor_returns['DLYRETURN'],axis=0).groupby(level=0).sum()
-portfolio_specifict_return=portfolio_weights.reindex(specific_returns.index).mul(specific_returns['SPECIFICRETURN'],axis=0).groupby(level=0).sum()
+portfolio_factor_return=portfolio_exposure.reindex(factor_returns.index).mul(factor_returns,axis=0).groupby(level=0).sum()
+portfolio_specific_return=portfolio_weights.reindex(specific_returns.index).mul(specific_returns,axis=0).groupby(level=0).sum()
 
-#todo  组合风险分解,根据portfolio_factor_return和portfolio_specific_return计算？
+#todo  组合风险分解,根据portfolio_factor_return和portfolio_specific_return计算，前提是二者在时序上不相关
 
 
-#todo 组合风险预测,半衰期的选择
+
 
 
 

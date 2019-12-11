@@ -60,7 +60,7 @@ options_xrisk_mysql={'server':'localhost',
                       'user':'root',
                       'password':'1234567890',
                       'database':'xrisk'}
-# connect_xrisk=ConnectMySQL(**options_xrisk_mysql)
+connect_xrisk=ConnectMySQL(**options_xrisk_mysql)
 
 
 # todo 从barra数据库读取某段时间内的factor return数据
