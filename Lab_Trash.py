@@ -53,3 +53,20 @@ sec_set=set(asset_returns.index.get_level_values(1))
 d=pd.Series(np.nan,pd.MultiIndex.from_product((t_set,sec_set))).sort_index()
 for i in d.index:
     d.loc[i]= asset_returns.loc[i]-(asset_exposure.loc[i]*factor_returns.loc[i[0]]).sum()*100.0-specific_returns.loc[i]
+
+
+
+import sys
+#from pandas import DataFrame  #DataFrame通常来装二维的表格
+import pandas as pd      #pandas是流行的做数据分析的包
+#建立字典，键和值都从文件里读出来。键是nam，age……，值是lili，jim……
+
+
+
+
+options_barra_database={'user':'riskdata',
+                   'password':'riskdata',
+                   'dsn':cx_Oracle.makedsn('172.16.100.188','1522','markdb')}
+
+
+

@@ -87,8 +87,7 @@ def GetFactorReturnsFromBarra(factors='all'):
     factor_returns = pd.read_sql(sql_get_factor_returns, connect_barra)
     factor_returns['TRADINGDATE']=pd.to_datetime(factor_returns['TRADINGDATE'],format='%Y%m%d')
     factor_returns=factor_returns.set_index(['TRADINGDATE', 'FACTOR']).sort_index()
-    #factor_returns.columns = factor_returns.columns.droplevel()
-    return factor_returns['DLYRETURN']*100.0
+    return factor_returns['DLYRETURN']*100.0 # todo 量级问题
 def GetFactorCovarianceFromBarra(factors='all'):
     factor_list = GenerateFactorNamesCombination(factors=factors)
     sql_get_factor_covariance = 'select TRADINGDATE,FACTOR1,FACTOR2,COVARIANCE from BARRA_FACTORCOV where TRADINGDATE BETWEEN ' + \
@@ -122,7 +121,6 @@ def GetSpecificRiskFromBarra():
     specific_risk['TRADINGDATE'] = pd.to_datetime(specific_risk['TRADINGDATE'], format='%Y%m%d')
     specific_risk = specific_risk.set_index(['TRADINGDATE', 'SECUCODE']).sort_index()
     return specific_risk.loc[~specific_risk.index.duplicated(keep='last'),'SPECIFICRISK']
-
 def GetAssetExposureFromBarra(factors='all'):
     factor_names = GenerateFactorNamesCombination(list_format=False,factors=factors)
     sql_get_asset_exposure = 'select SECUCODE,TRADINGDATE,' + factor_names + ' from barra_assetexposure where TRADINGDATE BETWEEN ' + start_date + ' and ' + end_date
@@ -201,7 +199,7 @@ connect_winddb=ConnectSQLserver(**options_winddb_datebase)
 
 # 全局参数设置
 # todo 自动化运行可能需要设定“最近一个月内”
-start_date,end_date=' 20180701','20180730' # 全局变量，控制所有输入数据
+start_date,end_date=' 20180701','20180730'
 factors='all' # 'style','others'
 benchmark='HS300' #
 port_code=None # '76C012'或者['76C012','76C012']
@@ -250,6 +248,7 @@ portfolio_specific_risk=np.sqrt(PortfolioSpecificRisk(portfolio_weights,specific
 portfolio_returns=portfolio_weights.reindex(asset_returns.index).mul(asset_returns,axis=0).groupby(level=0).sum().replace(0.0,np.nan)
 portfolio_returns-portfolio_factor_return-portfolio_specific_return # todo 存在误差？？？ 已知factor_return*100.0
 
-# todo 需要输出图片吗？？？
-#
+# todo 结果写入数据库，首先待确认要写入哪些数据？？？写入什么数据库？
+def WriteDataToSQL():
+    return None
 
