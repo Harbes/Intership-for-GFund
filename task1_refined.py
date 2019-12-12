@@ -147,7 +147,6 @@ def GetBenchmarkWeightsFromWindDB(benchmark='HS300'):
     return weights
 def GetPortfolioWeightsFromXrisk(port_code=None):
     # todo weights=holding*precose/sum() --- 问题：现金分红？
-    # todo 添加单个组合数据的读取
     sql_get_from_xrisk = "SELECT PORT_CODE,T_DATE,I_CODE,H_COUNT from xrisk.tcrp_hld WHERE (T_DATE BETWEEN '" + DatetimeBarraToXrisk(
         start_date) + "' AND '" + DatetimeBarraToXrisk(end_date) + "') and (A_TYPE= 'SPT_S')"
     if port_code is not None:
@@ -164,7 +163,6 @@ def GetPortfolioWeightsFromXrisk(port_code=None):
     return portfolio_weights
 # step3：计算
 def PortfolioExposure(asset_exposure,portfolio_weights=None):
-    # todo
     if portfolio_weights is None:
         return asset_exposure.groupby(level=0).mean().stack()
     elif portfolio_weights.size/len(portfolio_weights)==1.0: #todo 这一层if似乎可以合并到最有一层if中，前提是portfolio_weights是个TN*1的DataFrame，而不是Series
@@ -201,7 +199,8 @@ options_winddb_datebase={'server':'172.16.100.7',
                      'database':'NWindDB'}
 connect_winddb=ConnectSQLserver(**options_winddb_datebase)
 
-# todo 如果没有时间限制？--在组合分析时常用
+# 全局参数设置
+# todo 自动化运行可能需要设定“最近一个月内”
 start_date,end_date=' 20180701','20180730' # 全局变量，控制所有输入数据
 factors='all' # 'style','others'
 benchmark='HS300' #
@@ -213,6 +212,7 @@ port_code=None # '76C012'或者['76C012','76C012']
 factor_returns=GetFactorReturnsFromBarra(factors='all')
 specific_returns=GetSpecificReturnsFramBarra()
 factor_covariance=GetFactorCovarianceFromBarra(factors='all')
+specific_risk=GetSpecificRiskFromBarra()
 asset_returns=GetAssetReturnsFromBarra()
 # 从barra数据库读取asset exposure数据
 asset_exposure=GetAssetExposureFromBarra(factors='all')
@@ -239,17 +239,17 @@ portfolio_factor_return=portfolio_exposure.reindex(factor_returns.index).mul(fac
 portfolio_specific_return=portfolio_weights.reindex(specific_returns.index).mul(specific_returns,axis=0).groupby(level=0).sum()
 
 # todo  组合风险分解[倒推？？？]
-# todo 组合收益率出现0？？？
-portfolio_weights.loc[('2018-07-11',slice(None)),'002155'].dropna() # 结果： 601390
-asset_returns.loc[('2018-07-11','601390')] # 结果0.0
+# todo 组合收益率出现0，屏蔽？
+#portfolio_weights.loc[('2018-07-11',slice(None)),'002155'].dropna() # 结果： 601390
+#asset_returns.loc[('2018-07-11','601390')] # 结果0.0
+portfolio_factor_risk=np.sqrt(PortfolioFactorRisk(portfolio_exposure,factor_covariance)) # todo 量级感觉不对
+portfolio_specific_risk=np.sqrt(PortfolioSpecificRisk(portfolio_weights,specific_risk)) # todo 量级不对
 
 
+# 对组合收益率验证Barra结构模型
 portfolio_returns=portfolio_weights.reindex(asset_returns.index).mul(asset_returns,axis=0).groupby(level=0).sum().replace(0.0,np.nan)
-#portfolio_returns-portfolio_factor_return-portfolio_specific_return # todo 存在误差？？？ 已知factor_return*100.0
+portfolio_returns-portfolio_factor_return-portfolio_specific_return # todo 存在误差？？？ 已知factor_return*100.0
 
-portfolio_risk=portfolio_returns**2.0 # todo 组合收益率为0？
-portfolio_factor_risk=PortfolioFactorRisk(portfolio_exposure,factor_covariance) # todo 量级感觉不对
-portfolio_specific_risk=PortfolioSpecificRisk(portfolio_weights,specific_risk) # todo 量级不对
+# todo 需要输出图片吗？？？
+#
 
-
-portfolio_risk-(portfolio_factor_risk+portfolio_specific_risk)
