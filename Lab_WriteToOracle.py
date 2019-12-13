@@ -25,3 +25,16 @@ connect_str='oracle+cx_oracle://riskdata:riskdata@172.16.100.188:1522/markdb'
 data_source='C:/Users/shenzheng/PycharmProjects/Intership-for-GFund/DataSets/20191108_SPCALHCP_NCS_ADJ.SDC'
 data_SPCALHCP=ReadSPCALHCP(data_source)
 WriteToOracle(connect_str,data_SPCALHCP)
+
+
+
+import os
+import re
+def ScanDir(dir):
+    file_list=[]
+    for f in os.listdir(dir):
+        re.split('[_.]',f)
+
+
+s='20191108_SPCALHCP_NCS_ADJ.SDC'
+re.split('[_.]',s)
