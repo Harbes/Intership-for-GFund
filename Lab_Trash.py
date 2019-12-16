@@ -70,3 +70,11 @@ options_barra_database={'user':'riskdata',
 
 
 
+sql_get_from_barra="SELECT DISTINCT(TRADINGDATE) from BARRA_FACTORRET WHERE TRADINGDATE BETWEEN " +\
+                       start_date + " AND " + end_date
+    trading_calendar=pd.to_datetime(pd.read_sql(sql_get_from_barra, connect_barra)['TRADINGDATE'].sort_values(),format='%Y%m%d')
+    multi_index=pd.MultiIndex.from_product((trading_calendar,set(portfolio_eval.index.get_level_values(1))))
+    portfolio_weights=pd.DataFrame(np.nan,index=multi_index,columns=portfolio_eval.columns).sort_index()
+    for p in portfolio_weights.columns:
+        portfolio_weights[p]=portfolio_eval[p].unstack().reindex(trading_calendar).shift(1).apply(lambda x:x/x.sum(),axis=1).stack()
+    return portfolio_weights
