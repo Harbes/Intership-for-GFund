@@ -15,10 +15,12 @@ import datetime
 # 小工具
 def GenerateFactorNamesCombination(list_format=True, factors='all'):
     '''
-    :param factors: all,style
+
+    :param list_format: 输出结果以列表或字符串呈现
+    :param factors: all,style,industry,other
     :return:
     '''
-    factor_name_excluding_industry_country = [
+    factor_name_style = [
     'CNE5S_BETA', 'CNE5S_BTOP', 'CNE5S_EARNYILD', 'CNE5S_GROWTH', 'CNE5S_LEVERAGE', 'CNE5S_LIQUIDTY',
     'CNE5S_MOMENTUM', 'CNE5S_RESVOL', 'CNE5S_SIZE', 'CNE5S_SIZENL']
     factor_name_all = ['CNE5S_AERODEF', 'CNE5S_AIRLINE',
@@ -33,13 +35,15 @@ def GenerateFactorNamesCombination(list_format=True, factors='all'):
                        'CNE5S_REALEST', 'CNE5S_RESVOL', 'CNE5S_RETAIL', 'CNE5S_SIZE',
                        'CNE5S_SIZENL', 'CNE5S_SOFTWARE', 'CNE5S_TRDDIST', 'CNE5S_UTILITIE']
 
-    if factors=='all':
+    if factors.upper()=='ALL':
         factor_list=factor_name_all
-    elif factors=='style':
-        factor_list=factor_name_excluding_industry_country
-    else:
+    elif factors.upper()=='STYLE':
+        factor_list=factor_name_style
+    elif factors.upper()=='INDUSTRY':
         # todo 剔除国家因子
-        factor_list=list(set(factor_name_all).difference(factor_name_excluding_industry_country).difference(['CNE5S_COUNTRY']))
+        factor_list=list(set(factor_name_all).difference(factor_name_style).difference(['CNE5S_COUNTRY']))
+    else:
+        factor_list=['CNE5S_COUNTRY']
     if not list_format:
         factor_list_for_sql = ''
         for i in factor_list[:-1]:
@@ -197,9 +201,8 @@ def PortfolioExposure(asset_exposure,weights=None):
 
         return portfolio_exposure
 def PortfolioReturn(asset_returns, weights):
-    # todo 组合return计算方式：
-    # 个股收益率使用wind数据库计算，而不使用barra数据库中的数据
-    return weights.reindex(asset_returns.index).mul(asset_returns, axis=0).groupby(level=0).sum().replace(0.0, np.nan)
+    filter_condition=weights.groupby(level=0).sum().iloc[::-1].cumprod().iloc[::-1]!=0.0
+    return weights.reindex(asset_returns.index).mul(asset_returns, axis=0).groupby(level=0).sum()[filter_condition]
 def PortfolioFactorRisk(portfolio_exposure,factor_covariance):
     t_set=set(portfolio_exposure.index.get_level_values(0))
     factor_risk=pd.DataFrame(np.nan,index=t_set,columns=portfolio_exposure.columns).sort_index()
@@ -207,15 +210,18 @@ def PortfolioFactorRisk(portfolio_exposure,factor_covariance):
         for p in factor_risk.columns:
             factor_risk.loc[t,p]=factor_covariance.loc[t].values@portfolio_exposure.loc[(t,factor_covariance.columns),p]@portfolio_exposure.loc[(t,factor_covariance.columns),p]
     return factor_risk
-def PortfolioSpecificRisk(weights,specific_risk):
-    return (weights**2.0).mul(specific_risk.reindex(weights.index),axis=0).groupby(level=0).sum()
-def PortfolioFactorReturnDecom(portfolio_exposure,factor_returns):
+def PortfolioSpecificRisk(specific_risk,weights):
+    return (weights**2.0).mul(specific_risk.reindex(weights.index)**2.0,axis=0).groupby(level=0).sum()
+def PortfolioFactorReturnDecom(portfolio_exposure,factor_returns,weights):
+    filter_condition = weights.groupby(level=0).sum().iloc[::-1].cumprod().iloc[::-1] != 0.0
     portfolio_factor_return_contribution=portfolio_exposure.reindex(factor_returns.index).mul(factor_returns,axis=0)
     style_factor_list=GenerateFactorNamesCombination(factors='style')
-    other_factor_list=GenerateFactorNamesCombination(factors='others')#+['CNE5S_COUNTRY']
-    portfolio_style_factor_return=portfolio_factor_return_contribution.loc[(slice(None),style_factor_list),slice(None)].groupby(level=0).sum()
-    portfolio_other_factor_return=portfolio_factor_return_contribution.loc[(slice(None),other_factor_list),slice(None)].groupby(level=0).sum()
-    return portfolio_style_factor_return,portfolio_other_factor_return
+    industry_factor_list=GenerateFactorNamesCombination(factors='industry')#+
+    country_factor_list=['CNE5S_COUNTRY']
+    portfolio_style_factor_return=portfolio_factor_return_contribution.loc[(slice(None),style_factor_list),slice(None)].groupby(level=0).sum()[filter_condition]
+    portfolio_industry_factor_return=portfolio_factor_return_contribution.loc[(slice(None),industry_factor_list),slice(None)].groupby(level=0).sum()[filter_condition]
+    portfolio_country_factor_return=portfolio_factor_return_contribution.loc[(slice(None),country_factor_list),slice(None)].groupby(level=0).sum()[filter_condition]
+    return portfolio_style_factor_return,portfolio_industry_factor_return,portfolio_country_factor_return
 def PortfolioSpecificReturn(specific_returns,weights):
     return weights.reindex(specific_returns.index).mul(specific_returns,axis=0).groupby(level=0).sum()
 
@@ -254,7 +260,7 @@ benchmark_weights = GetBenchmarkWeightsFromWindDB(benchmark='HS300')
 # 从xrisk数据库读取并计算现实组合的每日权重数据
 portfolio_weights=GetPortfolioWeightsFromXrisk(port_code=None) # 例如：76C012; '76H002'出现大量0收益率
 #port_76=GetPortfolioWeightsFromXrisk(port_code='76C012')
-p76=GetPortfolioWeightsFromXrisk(port_code='76H002') # 权重权重之和出现为0的情况，源于组合在某些日期出现 h_count 没有数据，数据缺失还是已经卖出？
+#p76=GetPortfolioWeightsFromXrisk(port_code='76H002') # 权重权重之和出现为0的情况，源于组合在某些日期出现 h_count 没有数据，数据缺失还是已经卖出？
 
 # 计算组合的因子暴露以及超额暴露、超额收益率
 market_exposure=PortfolioExposure(asset_exposure) #等权重的市场组合
@@ -264,35 +270,36 @@ excess_market_exposure= market_exposure.sub(benchmark_exposure,axis=0)
 excess_portfolio_exposure=portfolio_exposure.sub(benchmark_exposure,axis=0) # DataFrame减去Series，建议使用.sub命令
 
 # 计算组合的因子收益率、特质收益率
-portfolio_style_factor_return,portfolio_other_factor_return=PortfolioFactorReturnDecom(portfolio_exposure,factor_returns)
-portfolio_specific_return=PortfolioSpecificReturn()
-# todo  组合风险分解[倒推？？？]
-# todo 组合收益率出现0，屏蔽？ ---> 先卖出，后买入
+portfolio_style_factor_return,portfolio_industry_factor_return,portfolio_country_factor_return=PortfolioFactorReturnDecom(portfolio_exposure,factor_returns)
+portfolio_specific_return=PortfolioSpecificReturn(specific_returns,portfolio_weights)
+
 #portfolio_weights.loc[('2018-07-11',slice(None)),'002155'].dropna() # 结果： 601390
 #asset_returns.loc[('2018-07-11','601390')] # 结果0.0
-portfolio_factor_risk=np.sqrt(PortfolioFactorRisk(portfolio_exposure,factor_covariance)) # todo 量级感觉不对
-portfolio_specific_risk=np.sqrt(PortfolioSpecificRisk(portfolio_weights,specific_risk)) # todo 量级不对
-np.sqrt((portfolio_factor_risk**2.0).mean())# '005443'
-np.sqrt((portfolio_specific_risk**2.0).mean())
-portfolio_factor_risk.iloc[-1]
-
-((portfolio_returns['006195']*.01+1.0).cumprod()[-1]-1.0)*100.0
+portfolio_factor_risk=np.sqrt(PortfolioFactorRisk(portfolio_exposure,factor_covariance)) # todo 量级感觉不对，可能已经是年化的
+portfolio_specific_risk=np.sqrt(PortfolioSpecificRisk(specific_risk,portfolio_weights))
+portfolio_factor_risk['006195']
+portfolio_specific_risk['006195']
 
 
 # 对组合收益率验证Barra结构模型
 portfolio_returns=PortfolioReturn(asset_returns,portfolio_weights)
-portfolio_returns-portfolio_style_factor_return-portfolio_other_factor_return-portfolio_specific_return # todo 存在误差？？？ 已知factor_return*100.0
+portfolio_returns-portfolio_style_factor_return-portfolio_industry_factor_return-portfolio_country_factor_return-portfolio_specific_return # todo 存在误差？？？ 已知factor_return*100.0
 ((portfolio_returns*0.01+1).cumprod().iloc[-1]-1.0)*100.0 # '76H008' ,
 
 benchmark_return=PortfolioReturn(asset_returns,benchmark_weights)
 (benchmark_return*.01+1.0).cumprod().iloc[-1]
 
-# todo 数据不匹配是否因为之前的文档没考虑数据重复问题？？？
-portfolio_returns['006195'].sum()
-portfolio_style_factor_return['006195'].sum()
-portfolio_other_factor_return['006195'].sum() # 行业因子
-portfolio_specific_return['006195'].sum() # todo 特质收益率是否包括国家因子？？？
+# todo 累计收益率不匹配是因为不包括首日？权重问题？
+(portfolio_returns['006195'].iloc[1:]*.01+1.0).cumprod()*100.0-100.0 # todo 样本数据是不包括首日的？
+portfolio_returns['006195'].iloc[1:].sum()# #
+portfolio_style_factor_return['006195'].iloc[1:].sum()
+portfolio_industry_factor_return['006195'].iloc[1:].sum() # 行业因子
+portfolio_country_factor_return['006195'].iloc[1:].sum()
+portfolio_specific_return['006195'].iloc[1:].sum() #
 (portfolio_returns-portfolio_style_factor_return-portfolio_other_factor_return-portfolio_specific_return).sum() # 国家因子的归属，改变了各成分的符号！！！
 # todo 结果写入数据库，首先待确认要写入哪些数据？？？写入什么数据库？
+
+(benchmark_return*.01+1).cumprod().iloc[-1]-1.0 #
+3808.73/3629.79
 
 
