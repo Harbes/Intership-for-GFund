@@ -55,6 +55,7 @@ def GenerateFactorNamesCombination(list_format=True, factors='all'):
         return factor_list_for_sql
     else:
         return factor_list
+
 def DatetimeBarraToXrisk(date):
     '''
     由于全局变量start_date、end_date以及Barra数据库中的日期以'20191212'形式的字符串呈现，
@@ -63,6 +64,7 @@ def DatetimeBarraToXrisk(date):
     :return:  输出'2019-12-12'形式的日期
     '''
     return datetime.datetime.strptime(str.strip(date),'%Y%m%d').strftime('%Y-%m-%d')
+
 # step1: 准备数据
 def ConnectOracle(user,password,dsn):
     '''
@@ -72,6 +74,7 @@ def ConnectOracle(user,password,dsn):
     if connect:
         print("链接成功")
     return connect
+
 def ConnectSQLserver(server,user,password,database):
     '''
     用于链接wind数据库
@@ -80,6 +83,7 @@ def ConnectSQLserver(server,user,password,database):
     if connect:
         print('链接成功')
     return connect
+
 # step2: 读取数据
 def GetPrecloseFromWindDB():
     '''
@@ -98,10 +102,11 @@ def GetPrecloseFromWindDB():
     # 以(日期，股票代码)作为index，并去重
     preclose=preclose.set_index(['trade_dt','s_info_windcode']).sort_index().loc[~preclose.index.duplicated(keep='last')]
     return preclose['s_dq_preclose']
+
 def GetFactorReturnsFromBarra(factors='all'):
     '''
      从Barra数据库读取factor return数据；通过factors参数设置不同因子集合
-    :return: 生成(T*P)形式的Series
+    :return: 生成(T*K)形式的Series
     '''
     # 读取数据
     factor_list=GenerateFactorNamesCombination(factors=factors)
@@ -117,11 +122,12 @@ def GetFactorReturnsFromBarra(factors='all'):
 
     # 输出结果时调整量级（%）
     return factor_returns['DLYRETURN']*100.0
+
 def GetFactorCovarianceFromBarra(factors='all'):
     '''
     从Barra数据库读取因子协方差矩阵
     :param factors:
-    :return:
+    :return: 生成 (T*K)*K 形式的DataFrame
     '''
     # 读取数据
     factor_list = GenerateFactorNamesCombination(factors=factors)
@@ -141,6 +147,7 @@ def GetFactorCovarianceFromBarra(factors='all'):
     # 去除columns索引中多余的双层结构
     factor_covariance.columns=factor_covariance.columns.droplevel()
     return factor_covariance
+
 def GetAssetReturnsFromBarra(source='barra'):
     '''
     从Barra数据库读取asset returns数据，或从wind数据库中生成asset returns数据
@@ -170,11 +177,12 @@ def GetAssetReturnsFromBarra(source='barra'):
         # 计算股票日收益率，并调整量级
         asset_returns=adj_prc.set_index(['trade_dt','s_info_windcode']).T.pct_change().T['s_dq_adjclose'].sort_index()*100.0
         return asset_returns
+
 def GetAssetExposureFromBarra(factors='all'):
     '''
     从Barra数据库读取asset exposure
     :param factors:
-    :return: 生成(T*N)*P形式的DataFrame
+    :return: 生成(T*N)*K形式的DataFrame
     '''
     # 生成欲读取的因子集合
     factor_names = GenerateFactorNamesCombination(list_format=False,factors=factors)
@@ -188,6 +196,7 @@ def GetAssetExposureFromBarra(factors='all'):
     # 去重
     asset_exposure =asset_exposure.loc[~asset_exposure.index.duplicated(keep='last')]
     return asset_exposure
+
 def GetSpecificReturnsFramBarra():
     '''
     从Barra数据库读取specific return
@@ -203,6 +212,7 @@ def GetSpecificReturnsFramBarra():
     specific_returns = specific_returns.set_index(['TRADINGDATE', 'SECUCODE']).sort_index()
     # 去重，并输出series
     return specific_returns.loc[~specific_returns.index.duplicated(keep='last'),'SPECIFICRETURN']
+
 def GetSpecificRiskFromBarra():
     '''
     从Barra数据库读取specific risk
@@ -218,6 +228,7 @@ def GetSpecificRiskFromBarra():
     specific_risk = specific_risk.set_index(['TRADINGDATE', 'SECUCODE']).sort_index()
     # 去重，并输出Series
     return specific_risk.loc[~specific_risk.index.duplicated(keep='last'),'SPECIFICRISK']
+
 def GetBenchmarkWeightsFromWindDB(benchmark='HS300'):
     '''
     从wind数据库读取benchmark的权重
@@ -251,6 +262,7 @@ def GetBenchmarkWeightsFromWindDB(benchmark='HS300'):
         weights=weights.set_index(['trade_dt','s_con_windcode']).sort_index().loc[~weights.index.duplicated(keep='last')] # 去重
         #weights.columns=weights.columns.droplevel()
         return weights*.01
+
 def GetPortfolioWeightsFromXrisk(port_code=None):
     '''
     从xrisk和wind数据库获取并计算组合权重
@@ -309,6 +321,7 @@ def PortfolioExposure(asset_exposure,weights=None):
                 (asset_exposure.reindex(weights.index).mul(weights[p],axis=0).groupby(level=0).sum()/
                  (~asset_exposure.isnull()).reindex(weights.index).mul(weights[p],axis=0).groupby(level=0).sum()).stack()
         return portfolio_exposure
+
 def PortfolioReturn(asset_returns, weights):
     '''
     计算组合简单收益率（日频）
@@ -331,6 +344,7 @@ def PortfolioFactorRisk(portfolio_exposure,factor_covariance):
         for p in factor_risk.columns:
             factor_risk.loc[t,p]=factor_covariance.loc[t].values@portfolio_exposure.loc[(t,factor_covariance.columns),p]@portfolio_exposure.loc[(t,factor_covariance.columns),p]
     return factor_risk**0.5
+
 def PortfolioSpecificRisk(specific_risk,weights):
     '''
     计算组合特质风险：sqrt(W_p'*Cov*W_p)=sqrt(sum(W_p_i**2.0*specific_risk_i**2.0)))
@@ -359,6 +373,7 @@ def PortfolioFactorReturnDecom(portfolio_exposure,factor_returns,weights):
     portfolio_industry_factor_return=portfolio_factor_return_contribution.loc[(slice(None),industry_factor_list),slice(None)].groupby(level=0).sum()[filter_condition]
     portfolio_country_factor_return=portfolio_factor_return_contribution.loc[(slice(None),country_factor_list),slice(None)].groupby(level=0).sum()[filter_condition]
     return portfolio_style_factor_return,portfolio_industry_factor_return,portfolio_country_factor_return
+
 def PortfolioSpecificReturn(specific_returns,weights):
     '''
     计算组合特质收益率：W_p'*e
@@ -367,88 +382,88 @@ def PortfolioSpecificReturn(specific_returns,weights):
     return weights.reindex(specific_returns.index).mul(specific_returns,axis=0).groupby(level=0).sum()/\
            weights.reindex(specific_returns.index).mul(~specific_returns.isnull(),axis=0).groupby(level=0).sum()
 
-#if __name__ is '__main__':
+if __name__ is '__main__':
 # 连接数据库
-options_barra_database={'user':'riskdata',
+    options_barra_database={'user':'riskdata',
                    'password':'riskdata',
                    'dsn':cx_Oracle.makedsn('172.16.100.188','1522','markdb')}
-connect_barra=ConnectOracle(options_barra_database['user'],options_barra_database['password'],options_barra_database['dsn'])
-options_xrisk_database={'user':'risk_read',
+    connect_barra=ConnectOracle(options_barra_database['user'],options_barra_database['password'],options_barra_database['dsn'])
+    options_xrisk_database={'user':'risk_read',
                    'password':'riskRead2019',
                    'dsn':cx_Oracle.makedsn('172.16.100.230','1521','xrisk')}
-connect_xrisk=ConnectOracle(options_xrisk_database['user'],options_xrisk_database['password'],options_xrisk_database['dsn'])
-options_winddb_datebase={'server':'172.16.100.7',
+    connect_xrisk=ConnectOracle(options_xrisk_database['user'],options_xrisk_database['password'],options_xrisk_database['dsn'])
+    options_winddb_datebase={'server':'172.16.100.7',
                      'user':'mikuser',
                      'password':'mikuser',
                      'database':'NWindDB'}
-connect_winddb=ConnectSQLserver(options_winddb_datebase['server'],options_winddb_datebase['user'],options_winddb_datebase['password'],options_winddb_datebase['database'])
+    connect_winddb=ConnectSQLserver(options_winddb_datebase['server'],options_winddb_datebase['user'],options_winddb_datebase['password'],options_winddb_datebase['database'])
 
 # 全局参数设置
-start_date,end_date=' 20190604','20190712'
-benchmark='HS300' #
-port_code=None # '76C012'或者['76C012','76C012']
+    start_date,end_date=' 20190603','20191012'
+    benchmark='HS300' #
+    port_code='006195' #None #  #'76C012'或者['76C012','76C012']
 
 
 # 从barra数据库读取factor return、specifict return等数据
-factor_returns=GetFactorReturnsFromBarra(factors='all')
-specific_returns=GetSpecificReturnsFramBarra()
-factor_covariance=GetFactorCovarianceFromBarra(factors='all')
-specific_risk=GetSpecificRiskFromBarra()
-asset_returns=GetAssetReturnsFromBarra()
-asset_exposure=GetAssetExposureFromBarra(factors='all')
+    factor_returns=GetFactorReturnsFromBarra()
+    specific_returns=GetSpecificReturnsFramBarra()
+    factor_covariance=GetFactorCovarianceFromBarra()
+    specific_risk=GetSpecificRiskFromBarra()
+    asset_returns=GetAssetReturnsFromBarra()
+    asset_exposure=GetAssetExposureFromBarra()
 # 从wind数据库获取benchmark的权重数据
-benchmark_weights = GetBenchmarkWeightsFromWindDB(benchmark='HS300')
+    benchmark_weights = GetBenchmarkWeightsFromWindDB(benchmark=benchmark)
 # 从xrisk数据库读取并计算现实组合的每日权重数据
-portfolio_weights=GetPortfolioWeightsFromXrisk(port_code=None) # 例如：76C012; '76H002'出现大量0收益率
-#port_76=GetPortfolioWeightsFromXrisk(port_code='76C012')
-#p76=GetPortfolioWeightsFromXrisk(port_code='76H002') # 权重权重之和出现为0的情况，源于组合在某些日期出现 h_count 没有数据，数据缺失还是已经卖出？
+    portfolio_weights=GetPortfolioWeightsFromXrisk(port_code=port_code)
 
 # 计算组合的因子暴露以及超额暴露、超额收益率
 #market_exposure=PortfolioExposure(asset_exposure) #等权重的市场组合
-benchmark_exposure=PortfolioExposure(asset_exposure, weights=benchmark_weights)
-portfolio_exposure=PortfolioExposure(asset_exposure,weights=portfolio_weights)
+    benchmark_exposure=PortfolioExposure(asset_exposure, weights=benchmark_weights)
+    portfolio_exposure=PortfolioExposure(asset_exposure,weights=portfolio_weights)
 #excess_market_exposure= market_exposure.sub(benchmark_exposure,axis=0)
 #excess_portfolio_exposure=portfolio_exposure.sub(benchmark_exposure,axis=0) # DataFrame减去Series，建议使用.sub命令
 
 # 计算组合的因子收益率、特质收益率
-portfolio_style_factor_return,portfolio_industry_factor_return,portfolio_country_factor_return=PortfolioFactorReturnDecom(portfolio_exposure,factor_returns,portfolio_weights)
-portfolio_specific_return=PortfolioSpecificReturn(specific_returns,portfolio_weights)
-benchmark_style_factor_return,benchmark_industry_factor_return,benchmark_country_factor_return=PortfolioFactorReturnDecom(benchmark_exposure,factor_returns,benchmark_weights)
-benchmark_specific_return=PortfolioSpecificReturn(specific_returns,benchmark_weights)
-
-portfolio_returns=PortfolioReturn(asset_returns,portfolio_weights)
-benchmark_return=PortfolioReturn(asset_returns,benchmark_weights)
+    portfolio_style_factor_return,portfolio_industry_factor_return,portfolio_country_factor_return=PortfolioFactorReturnDecom(portfolio_exposure,factor_returns,portfolio_weights)
+    portfolio_specific_return=PortfolioSpecificReturn(specific_returns,portfolio_weights)
+    benchmark_style_factor_return,benchmark_industry_factor_return,benchmark_country_factor_return=PortfolioFactorReturnDecom(benchmark_exposure,factor_returns,benchmark_weights)
+    benchmark_specific_return=PortfolioSpecificReturn(specific_returns,benchmark_weights)
+    portfolio_returns=PortfolioReturn(asset_returns,portfolio_weights)
+    benchmark_return=PortfolioReturn(asset_returns,benchmark_weights)
+    portfolio_factor_risk=PortfolioFactorRisk(portfolio_exposure,factor_covariance)
+    portfolio_specific_risk=PortfolioSpecificRisk(specific_risk,portfolio_weights)
 
 # 对组合收益率验证Barra结构模型
 # todo 累计收益率不匹配是因为不包括首日？权重问题？
-#(portfolio_returns['006195'].iloc[1:]*.01+1.0).cumprod()*100.0-100.0 # todo 样本数据是不包括首日的？
-def AggResults(start_date,end_date,port_code=None):
-    res=pd.DataFrame(np.nan,index=['cumReturn','cumReturn_barra','SpecificReturn','FactorReturn','StyleFactorReturn','IndustryFactorReturn','CountryFactorReturn','TotalRisk','CommonFactorRisk','ResidualRisk'],
+    def AggResults(start_date,end_date,port_code=None):
+        # todo 添加出现空仓股票的提示？？？
+        res=pd.DataFrame(np.nan,index=['cumReturn','cumReturn_barra','SpecificReturn','FactorReturn','StyleFactorReturn','IndustryFactorReturn','CountryFactorReturn','TotalRisk','CommonFactorRisk','ResidualRisk'],
                      columns=list(portfolio_returns.columns)+list([benchmark]))
-    res.loc['cumReturn']=\
-        np.hstack((portfolio_returns.loc[start_date:end_date].sum(),benchmark_return.loc[start_date:end_date].sum()))# 直接使用port_ret可能会导致分解不成立
-    res.loc['SpecificReturn']=np.hstack((portfolio_specific_return.loc[start_date:end_date].sum(),benchmark_specific_return.loc[start_date:end_date].sum()))
-    res.loc['StyleFactorReturn']=np.hstack((portfolio_style_factor_return.loc[start_date:end_date].sum(),benchmark_style_factor_return.loc[start_date:end_date].sum()))
-    res.loc['IndustryFactorReturn']=np.hstack((portfolio_industry_factor_return.loc[start_date:end_date].sum(),benchmark_industry_factor_return.loc[start_date:end_date].sum()))
-    res.loc['CountryFactorReturn']=np.hstack((portfolio_country_factor_return.loc[start_date:end_date].sum(),benchmark_country_factor_return.loc[start_date:end_date].sum()))
-    res.loc['FactorReturn']=res.loc[['StyleFactorReturn','IndustryFactorReturn','CountryFactorReturn']].sum()
-    res.loc['cumReturn_barra']=res.loc[['FactorReturn','SpecificReturn']].sum()
-    res.loc['CommonFactorRisk']=np.hstack((portfolio_factor_risk.loc[start_date:end_date].iloc[-1],np.nan))
-    res.loc['ResidualRisk']=np.hstack((portfolio_specific_risk.loc[start_date:end_date].iloc[-1],np.nan))
-    res.loc['TotalRisk']=np.sqrt((res.loc[['CommonFactorRisk','ResidualRisk']]**2.0).sum())
-    if port_code is None:
-        return res
-    elif type(port_code)==str:
-        return res[list([port_code])+[benchmark]]
-    else:
-        return res[list(port_code)+[benchmark]]
-AggResults(start_date,end_date)
+        res.loc['cumReturn']=\
+            np.hstack((portfolio_returns.loc[start_date:end_date].sum(),benchmark_return.loc[start_date:end_date].sum()))# 直接使用port_ret可能会导致分解不成立
+        res.loc['SpecificReturn']=np.hstack((portfolio_specific_return.loc[start_date:end_date].sum(),benchmark_specific_return.loc[start_date:end_date].sum()))
+        res.loc['StyleFactorReturn']=np.hstack((portfolio_style_factor_return.loc[start_date:end_date].sum(),benchmark_style_factor_return.loc[start_date:end_date].sum()))
+        res.loc['IndustryFactorReturn']=np.hstack((portfolio_industry_factor_return.loc[start_date:end_date].sum(),benchmark_industry_factor_return.loc[start_date:end_date].sum()))
+        res.loc['CountryFactorReturn']=np.hstack((portfolio_country_factor_return.loc[start_date:end_date].sum(),benchmark_country_factor_return.loc[start_date:end_date].sum()))
+        res.loc['FactorReturn']=res.loc[['StyleFactorReturn','IndustryFactorReturn','CountryFactorReturn']].sum()
+        res.loc['cumReturn_barra']=res.loc[['FactorReturn','SpecificReturn']].sum()
+        res.loc['CommonFactorRisk']=np.hstack((portfolio_factor_risk.loc[start_date:end_date].iloc[-1],np.nan))
+        res.loc['ResidualRisk']=np.hstack((portfolio_specific_risk.loc[start_date:end_date].iloc[-1],np.nan))
+        res.loc['TotalRisk']=np.sqrt((res.loc[['CommonFactorRisk','ResidualRisk']]**2.0).sum())
+        if port_code is None:
+            return res
+        elif type(port_code)==str:
+            return res[list([port_code])+[benchmark]]
+        else:
+            return res[list(port_code)+[benchmark]]
+    res=AggResults(start_date,end_date,port_code=port_code)
+    print(res)
 
 # test Barra decom
-(portfolio_returns-portfolio_style_factor_return-portfolio_industry_factor_return-portfolio_country_factor_return-portfolio_specific_return)#.sum()
+#(portfolio_returns-portfolio_style_factor_return-portfolio_industry_factor_return-portfolio_country_factor_return-portfolio_specific_return)#.sum()
 
 
-# todo 结果写入数据库，首先待确认要写入哪些数据？？？写入什么数据库？
+# todo 结果写入数据库：数据，数据库
 
 
 
