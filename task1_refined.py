@@ -1,9 +1,3 @@
-# code习惯说明：
-#   变量小写，且使用“_”连接
-#       sql开头：表示字符串形式的sql命令
-#   函数首字母大写，且不使用“_”连接
-#
-
 import pandas as pd
 import numpy as np
 import cx_Oracle
@@ -11,6 +5,8 @@ import pymssql
 import pymysql
 import matplotlib.pyplot as plt
 import datetime
+import logging
+from ConnectDatabase import ConnectOracle,ConnectSQLserver
 
 # 小工具
 def GenerateFactorNamesCombination(list_format=True, factors='all'):
@@ -65,43 +61,27 @@ def DatetimeBarraToXrisk(date):
     '''
     return datetime.datetime.strptime(str.strip(date),'%Y%m%d').strftime('%Y-%m-%d')
 
-# step1: 准备数据
-def ConnectOracle(user,password,dsn):
-    '''
-    用于链接barra、Xrisk等数据库
-    '''
-    connect=cx_Oracle.connect(user,password,dsn)
-    if connect:
-        print("链接成功")
-    return connect
 
-def ConnectSQLserver(server,user,password,database):
-    '''
-    用于链接wind数据库
-    '''
-    connect=pymssql.connect(server,user,password,database)
-    if connect:
-        print('链接成功')
-    return connect
-
-# step2: 读取数据
-def GetPrecloseFromWindDB():
+# 读取数据
+def GetPriceFromWindDB(price='open'):
     '''
     从wind数据库获取股票上个交易日收盘价，用于计算组合权重 w = preclose * holdings / sum(...)
     :return: 生成(T*N)形式的series
     '''
+    if price.upper()=='CLOSE':
     # 从数据库读取数据
-    sql_get_preclose='select trade_dt,s_info_windcode,s_dq_preclose from ashareeodprices where trade_dt between ' + start_date + ' and ' + end_date
-    preclose=pd.read_sql(sql_get_preclose,connect_winddb)
-
+        sql_get_price='select trade_dt,s_info_windcode,s_dq_close from ashareeodprices where trade_dt between ' + start_date + ' and ' + end_date
+    else:
+        sql_get_price='select trade_dt,s_info_windcode,s_dq_open from ashareeodprices where trade_dt between ' + start_date + ' and ' + end_date
+    price=pd.read_sql(sql_get_price,connect_winddb)
     #对字符串形式的日期转化为python的datatime
-    preclose['trade_dt']=pd.to_datetime(preclose['trade_dt'],format='%Y%m%d')
+    price['trade_dt']=pd.to_datetime(price['trade_dt'],format='%Y%m%d')
     # 去除wind数据库中的股票代码后缀 .SH、.SZ
-    preclose['s_info_windcode'] = preclose['s_info_windcode'].str.slice_replace(6, repl='')
+    price['s_info_windcode'] = price['s_info_windcode'].str.slice_replace(6, repl='')
 
     # 以(日期，股票代码)作为index，并去重
-    preclose=preclose.set_index(['trade_dt','s_info_windcode']).sort_index().loc[~preclose.index.duplicated(keep='last')]
-    return preclose['s_dq_preclose']
+    price=price.set_index(['trade_dt','s_info_windcode']).sort_index().loc[~price.index.duplicated(keep='last')]
+    return price.iloc[:,0]
 
 def GetFactorReturnsFromBarra(factors='all'):
     '''
@@ -238,8 +218,8 @@ def GetBenchmarkWeightsFromWindDB(benchmark='HS300'):
     # todo 标普低波红利指数可能需要另设
     # todo 权重设置问题；hs300尝试使用开盘权重
     benchmark_set = {'HS300': ('i_weight', 'aindexhs300closeweight'), # 当日收盘权重
-                     'CSI500': ('weight', 'AIndexCSI500Weight'),
-                     'SSE50': ('weight', 'AIndexSSE50Weight')  # 上证50似乎只有20180830之前的数据
+                     'CSI500': ('weight', 'AIndexCSI500Weight'), # 没有找到相关数据
+                     'SSE50': ('weight', 'AIndexSSE50Weight')  # 上证50数据不全
                      }
     benchmark=benchmark.upper()
     if benchmark=='HS300':
@@ -260,7 +240,6 @@ def GetBenchmarkWeightsFromWindDB(benchmark='HS300'):
         ## 注意：由于Barra数据库中股票代码没有SH之类的后缀，因此，来自winddb的股票代码需要去除后缀
         weights['s_con_windcode']=weights['s_con_windcode'].str.slice_replace(6,repl='')
         weights=weights.set_index(['trade_dt','s_con_windcode']).sort_index().loc[~weights.index.duplicated(keep='last')] # 去重
-        #weights.columns=weights.columns.droplevel()
         return weights*.01
 
 def GetPortfolioWeightsFromXrisk(port_code=None):
@@ -291,13 +270,13 @@ def GetPortfolioWeightsFromXrisk(port_code=None):
     portfolio_count.columns = portfolio_count.columns.droplevel()
 
     # 从wind数据库获取前日收盘价苏剧
-    preclose = GetPrecloseFromWindDB()
+    open_prc = GetPriceFromWindDB(price='open')
+    close_prc=GetPriceFromWindDB(price='close')
+    price=(open_prc+close_prc)*.5
+    # 计算并输出组合权重 w=(count*price)/sum(...)
+    return portfolio_count.reindex(price.index).mul(price,axis=0).groupby(level=0).apply(lambda x:x/x.sum())
 
-    # 计算并输出组合权重 w=(count*preclose)/sum(...)
-    return portfolio_count.reindex(preclose.index).mul(preclose,axis=0).groupby(level=0).apply(lambda x:x/x.sum())
-
-
-# step3：计算
+# 计算
 def PortfolioExposure(asset_exposure,weights=None):
     '''
     计算组合因子暴露 X_p=W_p'*X
@@ -383,7 +362,21 @@ def PortfolioSpecificReturn(specific_returns,weights):
            weights.reindex(specific_returns.index).mul(~specific_returns.isnull(),axis=0).groupby(level=0).sum()
 
 if __name__ is '__main__':
-# 连接数据库
+    # 启动logging
+    logging.debug('debug')
+    logging.info('info message')
+    logging.warning('warning message')
+    logging.error('error message')
+    logging.critical('critical message')
+    logging.basicConfig(level=logging.DEBUG,  # 控制台打印的日志级别
+                        filename='new.log',
+                        filemode='a',  ##模式，有w和a，w就是写模式，每次都会重新写日志，覆盖之前的日志,a是追加模式，默认如果不写的话，就是追加模式
+                        format=
+                        '%(asctime)s - %(pathname)s[line:%(lineno)d] - %(levelname)s: %(message)s'
+                        # 日志格式
+                        )
+
+    # 连接数据库
     options_barra_database={'user':'riskdata',
                    'password':'riskdata',
                    'dsn':cx_Oracle.makedsn('172.16.100.188','1522','markdb')}
@@ -398,31 +391,29 @@ if __name__ is '__main__':
                      'database':'NWindDB'}
     connect_winddb=ConnectSQLserver(options_winddb_datebase['server'],options_winddb_datebase['user'],options_winddb_datebase['password'],options_winddb_datebase['database'])
 
-# 全局参数设置
-    start_date,end_date=' 20190603','20190712'
+    # 全局参数设置
+    start_date,end_date=' 20190603','20191012'
     benchmark='HS300' #
-    port_code=None #'006195' #  #'76C012'或者['76C012','006195']
+    port_code='006195' #None # 或者['76C012','006195'] #
 
 
-# 从barra数据库读取factor return、specifict return等数据
+    # 从barra数据库读取factor return、specifict return等数据
     factor_returns=GetFactorReturnsFromBarra()
     specific_returns=GetSpecificReturnsFramBarra()
     factor_covariance=GetFactorCovarianceFromBarra()
     specific_risk=GetSpecificRiskFromBarra()
     asset_returns=GetAssetReturnsFromBarra()
     asset_exposure=GetAssetExposureFromBarra()
-# 从wind数据库获取benchmark的权重数据
+    # 从wind数据库获取benchmark的权重数据
     benchmark_weights = GetBenchmarkWeightsFromWindDB(benchmark=benchmark)
-# 从xrisk数据库读取并计算现实组合的每日权重数据
+    # 从xrisk数据库读取并计算现实组合的每日权重数据
     portfolio_weights=GetPortfolioWeightsFromXrisk(port_code=port_code)
 
-# 计算组合的因子暴露以及超额暴露、超额收益率
-#market_exposure=PortfolioExposure(asset_exposure) #等权重的市场组合
+    # 计算组合的因子暴露以及超额暴露、超额收益率
     benchmark_exposure=PortfolioExposure(asset_exposure, weights=benchmark_weights)
     portfolio_exposure=PortfolioExposure(asset_exposure,weights=portfolio_weights)
-#excess_market_exposure= market_exposure.sub(benchmark_exposure,axis=0)
 
-# 计算组合的因子收益率、特质收益率
+    # 计算组合的因子收益率、特质收益率
     portfolio_style_factor_return,portfolio_industry_factor_return,portfolio_country_factor_return=PortfolioFactorReturnDecom(portfolio_exposure,factor_returns,portfolio_weights)
     portfolio_specific_return=PortfolioSpecificReturn(specific_returns,portfolio_weights)
     benchmark_style_factor_return,benchmark_industry_factor_return,benchmark_country_factor_return=PortfolioFactorReturnDecom(benchmark_exposure,factor_returns,benchmark_weights)
@@ -432,6 +423,7 @@ if __name__ is '__main__':
     portfolio_factor_risk=PortfolioFactorRisk(portfolio_exposure,factor_covariance)
     portfolio_specific_risk=PortfolioSpecificRisk(specific_risk,portfolio_weights)
 
+    # 汇总结果
     def AggResult1(start_date,end_date,port_code=None):
         '''
         用于展现组合超额暴露、超额收益、累积超额收益
@@ -478,10 +470,10 @@ if __name__ is '__main__':
         # 转换结构：(T*K)*P ---> (K*T)*P ，方便对导出的数据进行处理
         excess_market_style_factor_exposure=excess_market_exposure.swaplevel(0,1).sort_index().loc[style_factor_list]
         return excess_market_style_factor_exposure,excess_market_style_factor_return,excess_market_style_factor_return.groupby(level=0).cumsum()
-    ex_po,ex_ret,cum_ex_ret=AggResult2(start_date,end_date)
-# 对组合收益率验证Barra结构模型
-# todo 累计收益率不匹配是因为不包括首日？权重问题？
-# todo 误差需要处理：当时间跨度较长时，误差累计逐渐增加【系统性误差？】。解决方案：比例缩放？
+    ex_po_m,ex_ret_m,cum_ex_ret_m=AggResult2(start_date,end_date)
+
+    # todo 累计收益率不匹配是因为不包括首日？权重问题？
+    # todo 误差需要处理：当时间跨度较长时，误差累计逐渐增加【系统性误差？】
     def AggResult3(start_date,end_date,port_code=None):
         '''
         用于展现组合与基准的收益分解和风险预测
@@ -503,17 +495,12 @@ if __name__ is '__main__':
         res.loc['cumReturn_barra']=res.loc[['FactorReturn','SpecificReturn']].sum()
         res.loc['CommonFactorRisk']=np.hstack((portfolio_factor_risk.loc[start_date:end_date].iloc[-1],np.nan))
         res.loc['ResidualRisk']=np.hstack((portfolio_specific_risk.loc[start_date:end_date].iloc[-1],np.nan))
-        res.loc['TotalRisk']=np.sqrt((res.loc[['CommonFactorRisk','ResidualRisk']]**2.0).sum())
+        res.loc['TotalRisk']=np.sqrt((res.loc[['CommonFactorRisk','ResidualRisk']]**2.0).sum()).replace(0.0,np.nan)
         if port_code is None:
             return res
         elif type(port_code)==str:
             return res[list([port_code])+[benchmark]]
         else:
             return res[list(port_code)+[benchmark]]
-    res3=AggResult3(start_date,end_date,port_code=port_code)
-    print(res3)
-
-
-
-# todo 结果写入数据库：数据，数据库
-
+    AggResult3(start_date,end_date,port_code=port_code)
+    AggResult3('20190604','20190712',port_code=port_code)

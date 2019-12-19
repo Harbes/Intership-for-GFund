@@ -79,18 +79,12 @@ sql_get_from_barra="SELECT DISTINCT(TRADINGDATE) from BARRA_FACTORRET WHERE TRAD
         portfolio_weights[p]=portfolio_eval[p].unstack().reindex(trading_calendar).shift(1).apply(lambda x:x/x.sum(),axis=1).stack()
     return portfolio_weights
 
-# 算数平均与几何平均的差异
-T=100000
-ret_simple=pd.Series(np.random.randn(T))+0.1
-ret_arith=ret_simple.mean();ret_arith-(ret_simple).var()*0.5/100.0
-ret_geo=((ret_simple*.01+1).cumprod().iloc[-1])**(1.0/len(ret_simple))*100.0-100.0;ret_geo
-
 
 # test Barra decom
 # 组合
-err=(portfolio_returns-portfolio_style_factor_return-portfolio_industry_factor_return-portfolio_country_factor_return-portfolio_specific_return)#.sum()
-(err>=0.0).mean() # 0.988506
-(err>0.01).mean() # 0.862069
+err1=(portfolio_returns-portfolio_style_factor_return-portfolio_industry_factor_return-portfolio_country_factor_return-portfolio_specific_return)#.sum()
+(err1>=0.0).mean()
+(err1>0.01).mean()
 # 个股
 def TestAssetReturn(asset_returns,asset_exposure,factor_returns,specific_returns,method='fast'):
     if method=='fast':
@@ -112,6 +106,10 @@ err2=TestAssetReturn(asset_returns,asset_exposure,factor_returns,specific_return
 (err2>0.01).groupby(level=0).mean().mean() #0.5919120504665172
 
 
-
-
+# 算数平均与几何平均的差异
+T=100000
+ret_simple=pd.Series(np.random.randn(T))+0.1
+ret_arith=ret_simple.mean();ret_arith-(ret_simple).var()*0.5/100.0
+ret_geo=((ret_simple*.01+1).cumprod().iloc[-1])**(1.0/len(ret_simple))*100.0-100.0;ret_geo
+ret_log=np.log(ret_simple*.01+1).mean()*100.0;ret_log
 
