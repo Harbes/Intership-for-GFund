@@ -236,7 +236,7 @@ def GetBenchmarkWeightsFromWindDB(benchmark='HS300'):
     :return: 生成(T*N)形式的Series
     '''
     # todo 标普低波红利指数可能需要另设
-    # todo 权重设置问题；
+    # todo 权重设置问题；hs300尝试使用开盘权重
     benchmark_set = {'HS300': ('i_weight', 'aindexhs300closeweight'), # 当日收盘权重
                      'CSI500': ('weight', 'AIndexCSI500Weight'),
                      'SSE50': ('weight', 'AIndexSSE50Weight')  # 上证50似乎只有20180830之前的数据
@@ -365,7 +365,7 @@ def PortfolioFactorReturnDecom(portfolio_exposure,factor_returns,weights):
 
     # 生成不同类因子集合
     style_factor_list=GenerateFactorNamesCombination(factors='style')
-    industry_factor_list=GenerateFactorNamesCombination(factors='industry')#+
+    industry_factor_list=GenerateFactorNamesCombination(factors='industry')
     country_factor_list=['CNE5S_COUNTRY']
 
     # 计算不同类因子收益率贡献：同类因子收益率贡献的加总
@@ -399,9 +399,9 @@ if __name__ is '__main__':
     connect_winddb=ConnectSQLserver(options_winddb_datebase['server'],options_winddb_datebase['user'],options_winddb_datebase['password'],options_winddb_datebase['database'])
 
 # 全局参数设置
-    start_date,end_date=' 20190603','20191012'
+    start_date,end_date=' 20190603','20190712'
     benchmark='HS300' #
-    port_code='006195' #None #  #'76C012'或者['76C012','76C012']
+    port_code=None #'006195' #  #'76C012'或者['76C012','006195']
 
 
 # 从barra数据库读取factor return、specifict return等数据
@@ -421,7 +421,6 @@ if __name__ is '__main__':
     benchmark_exposure=PortfolioExposure(asset_exposure, weights=benchmark_weights)
     portfolio_exposure=PortfolioExposure(asset_exposure,weights=portfolio_weights)
 #excess_market_exposure= market_exposure.sub(benchmark_exposure,axis=0)
-#excess_portfolio_exposure=portfolio_exposure.sub(benchmark_exposure,axis=0) # DataFrame减去Series，建议使用.sub命令
 
 # 计算组合的因子收益率、特质收益率
     portfolio_style_factor_return,portfolio_industry_factor_return,portfolio_country_factor_return=PortfolioFactorReturnDecom(portfolio_exposure,factor_returns,portfolio_weights)
@@ -433,9 +432,64 @@ if __name__ is '__main__':
     portfolio_factor_risk=PortfolioFactorRisk(portfolio_exposure,factor_covariance)
     portfolio_specific_risk=PortfolioSpecificRisk(specific_risk,portfolio_weights)
 
+    def AggResult1(start_date,end_date,port_code=None):
+        '''
+        用于展现组合超额暴露、超额收益、累积超额收益
+        :param start_date:
+        :param end_date:
+        :param port_code:
+        :return:
+        '''
+        # 计算组合在所有因子上的超额暴露
+        excess_portfolio_exposure=portfolio_exposure.sub(benchmark_exposure.iloc[:,0],axis=0) # DataFrame减去Series，建议使用.sub命令
+
+        # 由超额暴露计算超额收益
+        excess_factor_return=excess_portfolio_exposure.mul(factor_returns,axis=0)
+
+        # 生成风格因子集合，方便后续筛选
+        style_factor_list = GenerateFactorNamesCombination(factors='style')
+
+        # 转换结构：(T*K)*P ---> (K*T)*P ，方便对导出的数据进行处理
+        excess_portfolio_style_factor_exposure=excess_portfolio_exposure.swaplevel(0,1).sort_index().loc[style_factor_list]
+        excess_portfolio_style_factor_return=excess_factor_return.swaplevel(0,1).sort_index().loc[style_factor_list]
+
+        # 选择输出所有组合或者部分组合
+        if port_code is None:
+            return excess_portfolio_style_factor_exposure, excess_portfolio_style_factor_return, \
+                   excess_portfolio_style_factor_return.groupby(level=0).cumsum()
+        else:
+            return excess_portfolio_style_factor_exposure[port_code],excess_portfolio_style_factor_return[port_code],excess_portfolio_style_factor_return.groupby(level=0).cumsum()[port_code]
+    ex_po,ex_ret,cum_ex_ret=AggResult1(start_date,end_date,port_code=port_code) # ['76C012','006195']
+    def AggResult2(start_date,end_date):
+        '''
+        用于展现因子平均超额暴露、超额收益、累计超额收益
+        :param start_date:
+        :param end_date:
+        :return:
+        '''
+        # todo 简单平均还是加权平均；有点奇怪：为什么要计算“平均相对于benchmark”
+        # 计算各因子平均超额暴露
+        excess_market_exposure=asset_exposure.groupby(level=0).mean().stack().sub(benchmark_exposure.iloc[:,0],axis=0)
+
+        # 计算各因子超额收益
+        style_factor_list = GenerateFactorNamesCombination(factors='style')
+        excess_market_style_factor_return=excess_market_exposure.mul(factor_returns,axis=0).swaplevel(0,1).sort_index().loc[style_factor_list]
+
+        # 转换结构：(T*K)*P ---> (K*T)*P ，方便对导出的数据进行处理
+        excess_market_style_factor_exposure=excess_market_exposure.swaplevel(0,1).sort_index().loc[style_factor_list]
+        return excess_market_style_factor_exposure,excess_market_style_factor_return,excess_market_style_factor_return.groupby(level=0).cumsum()
+    ex_po,ex_ret,cum_ex_ret=AggResult2(start_date,end_date)
 # 对组合收益率验证Barra结构模型
 # todo 累计收益率不匹配是因为不包括首日？权重问题？
-    def AggResults(start_date,end_date,port_code=None):
+# todo 误差需要处理：当时间跨度较长时，误差累计逐渐增加【系统性误差？】。解决方案：比例缩放？
+    def AggResult3(start_date,end_date,port_code=None):
+        '''
+        用于展现组合与基准的收益分解和风险预测
+        :param start_date: 起始期
+        :param end_date:  结束期（此函数的起始期与结束期一定要在全局样本时期以内）
+        :param port_code: 组合代码或其列表形式的集合
+        :return:
+        '''
         # todo 添加出现空仓股票的提示？？？
         res=pd.DataFrame(np.nan,index=['cumReturn','cumReturn_barra','SpecificReturn','FactorReturn','StyleFactorReturn','IndustryFactorReturn','CountryFactorReturn','TotalRisk','CommonFactorRisk','ResidualRisk'],
                      columns=list(portfolio_returns.columns)+list([benchmark]))
@@ -456,14 +510,10 @@ if __name__ is '__main__':
             return res[list([port_code])+[benchmark]]
         else:
             return res[list(port_code)+[benchmark]]
-    res=AggResults(start_date,end_date,port_code=port_code)
-    print(res)
+    res3=AggResult3(start_date,end_date,port_code=port_code)
+    print(res3)
 
-# test Barra decom
-#(portfolio_returns-portfolio_style_factor_return-portfolio_industry_factor_return-portfolio_country_factor_return-portfolio_specific_return)#.sum()
 
 
 # todo 结果写入数据库：数据，数据库
-
-
 

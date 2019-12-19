@@ -78,3 +78,40 @@ sql_get_from_barra="SELECT DISTINCT(TRADINGDATE) from BARRA_FACTORRET WHERE TRAD
     for p in portfolio_weights.columns:
         portfolio_weights[p]=portfolio_eval[p].unstack().reindex(trading_calendar).shift(1).apply(lambda x:x/x.sum(),axis=1).stack()
     return portfolio_weights
+
+# 算数平均与几何平均的差异
+T=100000
+ret_simple=pd.Series(np.random.randn(T))+0.1
+ret_arith=ret_simple.mean();ret_arith-(ret_simple).var()*0.5/100.0
+ret_geo=((ret_simple*.01+1).cumprod().iloc[-1])**(1.0/len(ret_simple))*100.0-100.0;ret_geo
+
+
+# test Barra decom
+# 组合
+err=(portfolio_returns-portfolio_style_factor_return-portfolio_industry_factor_return-portfolio_country_factor_return-portfolio_specific_return)#.sum()
+(err>=0.0).mean() # 0.988506
+(err>0.01).mean() # 0.862069
+# 个股
+def TestAssetReturn(asset_returns,asset_exposure,factor_returns,specific_returns,method='fast'):
+    if method=='fast':
+        asset_exposure_tmp = asset_exposure.stack().reset_index().set_index(
+            ['TRADINGDATE', 'level_2', 'SECUCODE']).unstack()
+        asset_exposure_tmp.columns = asset_exposure_tmp.columns.droplevel()
+        asset_factor_returns=asset_exposure_tmp.mul(factor_returns.reindex(asset_exposure_tmp.index), axis=0).groupby(level=0).sum().stack()
+        return asset_returns-asset_factor_returns-specific_returns
+    else:
+        asset_factor_returns=pd.Series(np.nan,asset_exposure.index)
+        for i in asset_exposure.index:
+            asset_factor_returns.loc[i]=\
+                (factor_returns.loc[i[0]]*asset_exposure.loc[i]).sum()
+        return asset_returns-asset_factor_returns-specific_returns
+err2=TestAssetReturn(asset_returns,asset_exposure,factor_returns,specific_returns)
+(err2>=0.0).mean() # 0.8204958314361527 0.812373499482339 #
+(err2>=0.01).mean() # 0.5978301486866276 0.5919120504665168
+(err2>0.0).groupby(level=0).mean().mean() # 0.812373499482339
+(err2>0.01).groupby(level=0).mean().mean() #0.5919120504665172
+
+
+
+
+
