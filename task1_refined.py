@@ -37,12 +37,11 @@ def GenerateFactorNamesCombination(list_format=True, factors='all'):
     elif factors.upper()=='STYLE':
         factor_list=factor_name_style
     elif factors.upper()=='INDUSTRY':
-        # todo 剔除国家因子
         factor_list=list(set(factor_name_all).difference(factor_name_style).difference(['CNE5S_COUNTRY']))
     else:
         factor_list=['CNE5S_COUNTRY']
 
-    # 根据需要，输出列表形式的因子名称集合或字符串形式的因子名称集合
+    # 根据需要，输出 列表形式的因子名称集合 或 字符串形式的因子名称集合
     if not list_format:
         factor_list_for_sql = ''
         for i in factor_list[:-1]:
@@ -65,7 +64,7 @@ def DatetimeBarraToXrisk(date):
 # 读取数据
 def GetPriceFromWindDB(price='open'):
     '''
-    从wind数据库获取股票上个交易日收盘价，用于计算组合权重 w = preclose * holdings / sum(...)
+    从wind数据库获取股票收盘价和开盘价，用于计算组合权重 w = (open+close)/2 * holdings / sum(...) ，林总建议使用开盘权重与收盘权重的均值
     :return: 生成(T*N)形式的series
     '''
     if price.upper()=='CLOSE':
@@ -361,7 +360,7 @@ def PortfolioSpecificReturn(specific_returns,weights):
     return weights.reindex(specific_returns.index).mul(specific_returns,axis=0).groupby(level=0).sum()/\
            weights.reindex(specific_returns.index).mul(~specific_returns.isnull(),axis=0).groupby(level=0).sum()
 
-if __name__ is '__main__':
+#if __name__ is '__main__':
     # 启动logging
     logging.debug('debug')
     logging.info('info message')
@@ -376,7 +375,7 @@ if __name__ is '__main__':
                         # 日志格式
                         )
 
-    # 连接数据库
+    # 数据库参数设置
     options_barra_database={'user':'riskdata',
                    'password':'riskdata',
                    'dsn':cx_Oracle.makedsn('172.16.100.188','1522','markdb')}
@@ -392,10 +391,12 @@ if __name__ is '__main__':
     connect_winddb=ConnectSQLserver(options_winddb_datebase['server'],options_winddb_datebase['user'],options_winddb_datebase['password'],options_winddb_datebase['database'])
 
     # 全局参数设置
-    start_date,end_date=' 20190603','20191012'
+    ## 设置观测期起始日期，注意数据类型与格式
+    start_date,end_date='20190603','20191012'
+    ## 设置基准组合
     benchmark='HS300' #
-    port_code='006195' #None # 或者['76C012','006195'] #
-
+    ## 设置想要测算的组合代码，其中None表示不设置特定组合[即输出所有股票组合]
+    port_code=['76C012','006195']#'006195' #None # 或者['76C012','006195'] #
 
     # 从barra数据库读取factor return、specifict return等数据
     factor_returns=GetFactorReturnsFromBarra()
@@ -424,13 +425,13 @@ if __name__ is '__main__':
     portfolio_specific_risk=PortfolioSpecificRisk(specific_risk,portfolio_weights)
 
     # 汇总结果
-    def AggResult1(start_date,end_date,port_code=None):
+    def ExposureAndReturn(start_date,end_date,port_code=None):
         '''
         用于展现组合超额暴露、超额收益、累积超额收益
         :param start_date:
         :param end_date:
         :param port_code:
-        :return:
+        :return: 多个 (K*T)*P todo 修改成 T*(P*K)
         '''
         # 计算组合在所有因子上的超额暴露
         excess_portfolio_exposure=portfolio_exposure.sub(benchmark_exposure.iloc[:,0],axis=0) # DataFrame减去Series，建议使用.sub命令
@@ -442,39 +443,19 @@ if __name__ is '__main__':
         style_factor_list = GenerateFactorNamesCombination(factors='style')
 
         # 转换结构：(T*K)*P ---> (K*T)*P ，方便对导出的数据进行处理
-        excess_portfolio_style_factor_exposure=excess_portfolio_exposure.swaplevel(0,1).sort_index().loc[style_factor_list]
-        excess_portfolio_style_factor_return=excess_factor_return.swaplevel(0,1).sort_index().loc[style_factor_list]
+        excess_portfolio_style_factor_exposure=excess_portfolio_exposure.loc[(slice(None),style_factor_list),slice(None)].unstack()
+        excess_portfolio_style_factor_return=excess_factor_return.loc[(slice(None),style_factor_list),slice(None)].unstack()
 
         # 选择输出所有组合或者部分组合
         if port_code is None:
             return excess_portfolio_style_factor_exposure, excess_portfolio_style_factor_return, \
-                   excess_portfolio_style_factor_return.groupby(level=0).cumsum()
+                   excess_portfolio_style_factor_return.cumsum()
         else:
-            return excess_portfolio_style_factor_exposure[port_code],excess_portfolio_style_factor_return[port_code],excess_portfolio_style_factor_return.groupby(level=0).cumsum()[port_code]
-    ex_po,ex_ret,cum_ex_ret=AggResult1(start_date,end_date,port_code=port_code) # ['76C012','006195']
-    def AggResult2(start_date,end_date):
-        '''
-        用于展现因子平均超额暴露、超额收益、累计超额收益
-        :param start_date:
-        :param end_date:
-        :return:
-        '''
-        # todo 简单平均还是加权平均；有点奇怪：为什么要计算“平均相对于benchmark”
-        # 计算各因子平均超额暴露
-        excess_market_exposure=asset_exposure.groupby(level=0).mean().stack().sub(benchmark_exposure.iloc[:,0],axis=0)
-
-        # 计算各因子超额收益
-        style_factor_list = GenerateFactorNamesCombination(factors='style')
-        excess_market_style_factor_return=excess_market_exposure.mul(factor_returns,axis=0).swaplevel(0,1).sort_index().loc[style_factor_list]
-
-        # 转换结构：(T*K)*P ---> (K*T)*P ，方便对导出的数据进行处理
-        excess_market_style_factor_exposure=excess_market_exposure.swaplevel(0,1).sort_index().loc[style_factor_list]
-        return excess_market_style_factor_exposure,excess_market_style_factor_return,excess_market_style_factor_return.groupby(level=0).cumsum()
-    ex_po_m,ex_ret_m,cum_ex_ret_m=AggResult2(start_date,end_date)
-
+            return excess_portfolio_style_factor_exposure[port_code],excess_portfolio_style_factor_return[port_code],excess_portfolio_style_factor_return.cumsum()[port_code]
+    ex_po,ex_ret,cum_ex_ret=ExposureAndReturn(start_date,end_date,port_code=port_code) # port_code=['76C012','006195']
     # todo 累计收益率不匹配是因为不包括首日？权重问题？
-    # todo 误差需要处理：当时间跨度较长时，误差累计逐渐增加【系统性误差？】
-    def AggResult3(start_date,end_date,port_code=None):
+    # todo 误差需要处理：当时间跨度较长时，误差累计逐渐增加【系统性误差？】解决思路：比例缩放？把误差归于specific return
+    def DecomReturnAndRisk(start_date,end_date,port_code=None):
         '''
         用于展现组合与基准的收益分解和风险预测
         :param start_date: 起始期
@@ -502,5 +483,7 @@ if __name__ is '__main__':
             return res[list([port_code])+[benchmark]]
         else:
             return res[list(port_code)+[benchmark]]
-    AggResult3(start_date,end_date,port_code=port_code)
-    AggResult3('20190604','20190712',port_code=port_code)
+    decom_return_and_risk=DecomReturnAndRisk(start_date,end_date,port_code=port_code)
+    # DecomReturnAndRisk('20190604','20190712',port_code=port_code)
+
+    # todo 将结果输出：格式、位置
