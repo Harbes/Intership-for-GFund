@@ -113,3 +113,46 @@ ret_arith=ret_simple.mean();ret_arith-(ret_simple).var()*0.5/100.0
 ret_geo=((ret_simple*.01+1).cumprod().iloc[-1])**(1.0/len(ret_simple))*100.0-100.0;ret_geo
 ret_log=np.log(ret_simple*.01+1).mean()*100.0;ret_log
 
+
+# 0数据的加入，影响β系数的估计吗?---答案：与数据的均值有关，若均值为0，则不影响
+T=10000;T0=T/10
+a=pd.Series(np.random.randn(T))+0.3
+b=pd.Series(np.random.randn(T))+0.2
+a0=pd.concat([a,pd.Series(np.zeros(int(T0)))],axis=0);
+b0=pd.concat([b,pd.Series(np.zeros(int(T0)))],axis=0);
+a.cov(b)/b.var()
+a0.cov(b0)/b0.var()
+
+
+
+#
+import math
+def C_T_i(T,i):
+    return math.factorial(T)/math.factorial(i)/math.factorial(T-i)
+T=825;N1=3
+p=0.9545
+def cumProb(N1):
+    Pr=0.0
+    for i in range(1,N1+1):
+        Pr+=C_T_i(T,i)*p**i*(1-p)**(T-i)
+    return Pr
+def FindN(T,left_cut=0.025):
+    N1=int(T/2)# 初始值
+    N1_left=1
+    N1_right=T
+    cum_prob_L1=cumProb(N1)
+    cum_prob_L2=cumProb(N1+1)
+    for i in range(T):
+        if (cum_prob_L1<=left_cut) and (cum_prob_L2>=left_cut):
+            break
+        elif cum_prob_L1>left_cut:
+            N1_right,N1=N1,int((N1_left+N1)/2)
+        else:
+            N1_left,N1=N1,int((N1_right+N1)/2)
+    return N1
+T*p+2*np.sqrt(T*p*(1-p))
+
+A=np.arange(1,10).reshape(3,3)
+D=np.sqrt(np.diag(1/np.diag(A)));D
+D@A@D
+A

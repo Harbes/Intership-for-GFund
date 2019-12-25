@@ -454,17 +454,29 @@ def PortfolioSpecificReturn(specific_returns,weights):
             return excess_portfolio_style_factor_exposure[port_code],excess_portfolio_style_factor_return[port_code],excess_portfolio_style_factor_return.cumsum()[port_code]
     ex_po,ex_ret,cum_ex_ret=ExposureAndReturn(start_date,end_date,port_code=port_code) # port_code=['76C012','006195']
     # todo 累计收益率不匹配是因为不包括首日？权重问题？
-    # todo 误差需要处理：当时间跨度较长时，误差累计逐渐增加【系统性误差？】解决思路：比例缩放？把误差归于specific return
+    # 误差需要处理：当时间跨度较长时，误差累计逐渐增加【系统性误差？】解决思路：【林总建议】把误差归于specific return
     def DecomReturnAndRisk(start_date,end_date,port_code=None):
         '''
         用于展现组合与基准的收益分解和风险预测
         :param start_date: 起始期
         :param end_date:  结束期（此函数的起始期与结束期一定要在全局样本时期以内）
         :param port_code: 组合代码或其列表形式的集合
-        :return:
+        :return: 输出结果字段说明：
+        instruction = {'cumReturn':'累计收益率', # 由权重和股票收益率直接计算的组合累计收益率；累计收益率直接采用时间序列加总，这会高估组合表现，差值大约为一半的方差
+                       'cumReturn_barra':'累计收益率(Barra)',# 由Barra模型倒推的组合累计收益率
+                       'SpecificReturn':'特质收益率', # Barra模型计算的组合累计特质收益率
+                       'SpecificReturn_adjusted':'(调整后)特质收益率', # 由于Barra模型倒推计算的组合收益率与直接计算的组合收益率存在误差，林总建议将这部分误差归于特质收益率
+                       'FactorReturn':'所有因子收益率',# Barra没模型计算的组合收益率中的所有因子贡献
+                       'StyleFactorReturn':'风格因子收益率', # 因子收益率中的风格因子贡献
+                       'IndustryFactorReturn':'行业因子收益率', # 因子收益率中的行业因子贡献
+                       'CountryFactorReturn':'国家因子收益率', # 因子收益率中的国家因子贡献
+                       'TotalRisk':'预期年化风险',# Barra模型估计的组合总风险
+                       'CommonFactorRisk':'预期因子风险', # Barra模型估计的因子风险贡献
+                       'ResidualRisk':'预期特质风险'} # Barra模型估计的特质风险贡献
         '''
+
         # todo 添加出现空仓股票的提示？？？
-        res=pd.DataFrame(np.nan,index=['cumReturn','cumReturn_barra','SpecificReturn','FactorReturn','StyleFactorReturn','IndustryFactorReturn','CountryFactorReturn','TotalRisk','CommonFactorRisk','ResidualRisk'],
+        res=pd.DataFrame(np.nan,index=['cumReturn','cumReturn_barra','SpecificReturn','SpecificReturn_adjusted','FactorReturn','StyleFactorReturn','IndustryFactorReturn','CountryFactorReturn','TotalRisk','CommonFactorRisk','ResidualRisk'],
                      columns=list(portfolio_returns.columns)+list([benchmark]))
         res.loc['cumReturn']=\
             np.hstack((portfolio_returns.loc[start_date:end_date].sum(),benchmark_return.loc[start_date:end_date].sum()))# 直接使用port_ret可能会导致分解不成立
@@ -473,7 +485,8 @@ def PortfolioSpecificReturn(specific_returns,weights):
         res.loc['IndustryFactorReturn']=np.hstack((portfolio_industry_factor_return.loc[start_date:end_date].sum(),benchmark_industry_factor_return.loc[start_date:end_date].sum()))
         res.loc['CountryFactorReturn']=np.hstack((portfolio_country_factor_return.loc[start_date:end_date].sum(),benchmark_country_factor_return.loc[start_date:end_date].sum()))
         res.loc['FactorReturn']=res.loc[['StyleFactorReturn','IndustryFactorReturn','CountryFactorReturn']].sum()
-        res.loc['cumReturn_barra']=res.loc[['FactorReturn','SpecificReturn']].sum()
+        res.loc['cumReturn_barra']=res.loc['FactorReturn']+res.loc['SpecificReturn']
+        res.loc['SpecificReturn_adjusted']=res.loc['cumReturn']-res.loc['cumReturn_barra']+res.loc['SpecificReturn']
         res.loc['CommonFactorRisk']=np.hstack((portfolio_factor_risk.loc[start_date:end_date].iloc[-1],np.nan))
         res.loc['ResidualRisk']=np.hstack((portfolio_specific_risk.loc[start_date:end_date].iloc[-1],np.nan))
         res.loc['TotalRisk']=np.sqrt((res.loc[['CommonFactorRisk','ResidualRisk']]**2.0).sum()).replace(0.0,np.nan)
