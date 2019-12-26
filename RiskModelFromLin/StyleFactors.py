@@ -184,6 +184,7 @@ def Generate_MarketLev(start_date,end_date):
 
 
 
+
 if __name__ is '__main__':
     # 数据库参数设置
     options_winddb_datebase = {'server': '172.16.100.7',
