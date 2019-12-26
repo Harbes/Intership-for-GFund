@@ -2,8 +2,6 @@ import pandas as pd
 import numpy as np
 import cx_Oracle
 import pymssql
-import pymysql
-import matplotlib.pyplot as plt
 import datetime
 import logging
 from ConnectDatabase import ConnectOracle,ConnectSQLserver
@@ -215,7 +213,6 @@ def GetBenchmarkWeightsFromWindDB(benchmark='HS300'):
     :return: 生成(T*N)形式的Series
     '''
     # todo 标普低波红利指数可能需要另设
-    # todo 权重设置问题；hs300尝试使用开盘权重
     benchmark_set = {'HS300': ('i_weight', 'aindexhs300closeweight'), # 当日收盘权重
                      'CSI500': ('weight', 'AIndexCSI500Weight'), # 没有找到相关数据
                      'SSE50': ('weight', 'AIndexSSE50Weight')  # 上证50数据不全
@@ -360,8 +357,8 @@ def PortfolioSpecificReturn(specific_returns,weights):
     return weights.reindex(specific_returns.index).mul(specific_returns,axis=0).groupby(level=0).sum()/\
            weights.reindex(specific_returns.index).mul(~specific_returns.isnull(),axis=0).groupby(level=0).sum()
 
-#if __name__ is '__main__':
-    # 启动logging
+if __name__ is '__main__':
+    # 启动logging todo 不太懂，一下logging部分源于百度
     logging.debug('debug')
     logging.info('info message')
     logging.warning('warning message')
@@ -370,9 +367,7 @@ def PortfolioSpecificReturn(specific_returns,weights):
     logging.basicConfig(level=logging.DEBUG,  # 控制台打印的日志级别
                         filename='new.log',
                         filemode='a',  ##模式，有w和a，w就是写模式，每次都会重新写日志，覆盖之前的日志,a是追加模式，默认如果不写的话，就是追加模式
-                        format=
-                        '%(asctime)s - %(pathname)s[line:%(lineno)d] - %(levelname)s: %(message)s'
-                        # 日志格式
+                        format='%(asctime)s - %(pathname)s[line:%(lineno)d] - %(levelname)s: %(message)s'
                         )
 
     # 数据库参数设置
@@ -394,9 +389,11 @@ def PortfolioSpecificReturn(specific_returns,weights):
     ## 设置观测期起始日期，注意数据类型与格式
     start_date,end_date='20190603','20191012'
     ## 设置基准组合
-    benchmark='HS300' #
-    ## 设置想要测算的组合代码，其中None表示不设置特定组合[即输出所有股票组合]
-    port_code=['76C012','006195']#'006195' #None # 或者['76C012','006195'] #
+    benchmark='HS300'
+    ## 设置想要测算的组合代码，可以设置'006195' 、 ['76C012','006195'] 或者 None，其中None表示不设置特定组合[即输出所有股票组合]
+    port_code=['76C012','006195']
+    dir_output='X:/IT项目管理/Barra分析/Results/' #
+
 
     # 从barra数据库读取factor return、specifict return等数据
     factor_returns=GetFactorReturnsFromBarra()
@@ -431,7 +428,7 @@ def PortfolioSpecificReturn(specific_returns,weights):
         :param start_date:
         :param end_date:
         :param port_code:
-        :return: 多个 (K*T)*P todo 修改成 T*(P*K)
+        :return:  T*(P*K)
         '''
         # 计算组合在所有因子上的超额暴露
         excess_portfolio_exposure=portfolio_exposure.sub(benchmark_exposure.iloc[:,0],axis=0) # DataFrame减去Series，建议使用.sub命令
@@ -453,7 +450,9 @@ def PortfolioSpecificReturn(specific_returns,weights):
         else:
             return excess_portfolio_style_factor_exposure[port_code],excess_portfolio_style_factor_return[port_code],excess_portfolio_style_factor_return.cumsum()[port_code]
     ex_po,ex_ret,cum_ex_ret=ExposureAndReturn(start_date,end_date,port_code=port_code) # port_code=['76C012','006195']
-    # todo 累计收益率不匹配是因为不包括首日？权重问题？
+    ex_po.to_csv(dir_output+'风格因子超额暴露'+'_'+start_date+'_'+end_date+'.csv')
+    ex_ret.to_csv(dir_output+'风格因子超额收益'+'_'+start_date+'_'+end_date+'.csv')
+    cum_ex_ret.to_csv(dir_output+'风格因子累计超额收益'+'_'+start_date+'_'+end_date+'.csv')
     # 误差需要处理：当时间跨度较长时，误差累计逐渐增加【系统性误差？】解决思路：【林总建议】把误差归于specific return
     def DecomReturnAndRisk(start_date,end_date,port_code=None):
         '''
@@ -474,8 +473,6 @@ def PortfolioSpecificReturn(specific_returns,weights):
                        'CommonFactorRisk':'预期因子风险', # Barra模型估计的因子风险贡献
                        'ResidualRisk':'预期特质风险'} # Barra模型估计的特质风险贡献
         '''
-
-        # todo 添加出现空仓股票的提示？？？
         res=pd.DataFrame(np.nan,index=['cumReturn','cumReturn_barra','SpecificReturn','SpecificReturn_adjusted','FactorReturn','StyleFactorReturn','IndustryFactorReturn','CountryFactorReturn','TotalRisk','CommonFactorRisk','ResidualRisk'],
                      columns=list(portfolio_returns.columns)+list([benchmark]))
         res.loc['cumReturn']=\
@@ -497,6 +494,4 @@ def PortfolioSpecificReturn(specific_returns,weights):
         else:
             return res[list(port_code)+[benchmark]]
     decom_return_and_risk=DecomReturnAndRisk(start_date,end_date,port_code=port_code)
-    # DecomReturnAndRisk('20190604','20190712',port_code=port_code)
-
-    # todo 将结果输出：格式、位置
+    decom_return_and_risk.to_csv(dir_output+'组合收益风险分解'+'_'+start_date+'_'+end_date+'.csv')
