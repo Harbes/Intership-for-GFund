@@ -18,12 +18,12 @@ def GenerateSqlOrder(cols,table_name,start_date=None,end_date=None):
         if end_date is None:
             return 'SELECT ' + cols + ' from ' + table_name
         else:
-            return 'SELECT '+cols+' from '+table_name+' where trade_dt <= '+end_date
+            return 'SELECT '+cols+' from '+table_name+' where '+cols.split(',')[0]+' <= '+end_date
     else:
         if end_date is None:
-            return 'SELECT ' + cols + ' from ' + table_name + ' where trade_dt >= ' + start_date
+            return 'SELECT ' + cols + ' from ' + table_name + ' where '+cols.split(',')[0]+' >= ' + start_date
         else:
-            return 'SELECT '+cols+' from '+table_name+' where trade_dt between '+start_date+' and '+end_date
+            return 'SELECT '+cols+' from '+table_name+' where '+cols.split(',')[0]+' between '+start_date+' and '+end_date
 def GenerateDataframeFromWinddb(cols,table_name,start_date=None,end_date=None):
     #cols='trade_dt,s_info_windcode,s_dq_mv';table_name='AShareEODDerivativeIndicator';
     # 生成读取数据库的命令（字符串）
@@ -178,9 +178,47 @@ def Generate_STRREV_Seasonality_IndMom(start_date,end_date):
     return rev.replace(np.inf,np.nan)*100.0,seas[seas!=0.0],RS_S_6M,INDMOM,MOM,alpha
 
 # leverage
-def Generate_MarketLev(start_date,end_date):
+#def Generate_MarketLev(start_date,end_date):
     # 获取总市值、优先股、长期负债数据
-    tot_cap=GenerateDataframeFromWinddb('trade_dt,s_info_windcode,s_val_mv','AShareEODDerivativeIndicator',start_date,end_date)
+    ME=GenerateDataframeFromWinddb('trade_dt,s_info_windcode,s_val_mv','AShareEODDerivativeIndicator',start_date,end_date)
+    # todo PE没找到
+    #PE=
+    # 长期负债取资产负债表中的非流动负债数据
+    LD=GenerateDataframeFromWinddb('report_period,s_info_windcode,tot_non_cur_liab','AShareBalanceSheet',str(int(start_date)-10000))
+    # 总负债
+    TL=GenerateDataframeFromWinddb('report_period,s_info_windcode,tot_liab','AShareBalanceSheet',str(int(start_date)-10000))
+    # 总资产
+    TA=GenerateDataframeFromWinddb('report_period,s_info_windcode,tot_assets','AShareBalanceSheet',str(int(start_date)-10000))
+    # 过去5年营业收入
+    TOR=GenerateDataframeFromWinddb('report_period,s_info_windcode,tot_oper_rev','AShareIncome',str(int(start_date)-50000))
+    # 过去五年净利润
+    NI=GenerateDataframeFromWinddb('report_period,s_info_windcode,net_profit_excl_min_int_inc','AShareIncome',str(int(start_date)-50000))
+    # 过去五年现金及其等价物净增加额
+    Cash=GenerateDataframeFromWinddb('report_period,s_info_windcode,net_incr_cash_cash_equ','AShareCashFlow',str(int(start_date)-50000))
+    # 每股收益预测，对于由多个分析是预测的数据，采取简单平均处理
+    sql_order=GenerateSqlOrder('reporting_period,s_info_windcode,est_eps_diluted','AShareEarningEst',str(int(start_date)-50000))
+    eps=pd.read_sql(sql_order,connect_winddb).set_index(['reporting_period','s_info_windcode']).sort_index().groupby(level=(0,1)).mean()['est_eps_diluted'].unstack()
+    eps.index=pd.to_datetime(eps.index,format='%Y%m%d')
+    # todo 净经营资产
+    # 无息流动负债： 应付票据、应付账款、预收账款、应交税费、应付利息、其他应付款、其他流动负债。
+    sql_order=GenerateSqlOrder('report_period,s_info_windcode,notes_payable,acct_payable,adv_from_cust,taxes_surcharges_payable,int_payable,oth_payable,oth_cur_liab','AShareBalanceSheet',str(int(start_date)-50000))
+    free_liq_lia=pd.read_sql(sql_order,connect_winddb).set_index(['report_period','s_info_windcode']).sum(axis=1).sort_index()
+    # 存在很多重复index，但数据都不同。此处的选择是保留最后一项
+    free_liq_lia=free_liq_lia.iloc[~free_liq_lia.index.duplicated(keep='last')].unstack()
+    # 折旧与摊销
+    DA=GenerateDataframeFromWinddb('report_period,s_info_windcode,s_stm_is','AShareFinancialIndicator',str(int(start_date)-10000))
+    # 经营活动现金流量净额
+    CFO=GenerateDataframeFromWinddb('report_period,s_info_windcode,net_cash_flows_oper_act','AShareCashFlow',str(int(start_date)-10000))
+    # 投资活动现金流量净额
+    CFI=GenerateDataframeFromWinddb('report_period,s_info_windcode,net_cash_flows_inv_act','AShareCashFlow',str(int(start_date)-10000))
+    # 营业成本
+    TOC=GenerateDataframeFromWinddb('report_period,s_info_windcode,tot_oper_cost','AShareIncome',str(int(start_date)-10000))
+    # 销售毛利率 todo 金融类企业似乎没有这个指标，所以需要删除所有金融类企业吗
+    GPM=GenerateDataframeFromWinddb('report_period,s_info_windcode,s_fa_grossprofitmargin','AShareFinancialIndicator',str(int(start_date)-10000))
+
+
+
+
 
 
 
