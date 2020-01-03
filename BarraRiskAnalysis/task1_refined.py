@@ -125,7 +125,7 @@ def GetFactorCovarianceFromBarra(factors='all'):
     factor_covariance.columns=factor_covariance.columns.droplevel()
     return factor_covariance
 
-def GetAssetReturnsFromBarra(source='barra'):
+def GetAssetReturnsFromBarraOrWind(source='barra'):
     '''
     从Barra数据库读取asset returns数据，或从wind数据库中生成asset returns数据
     :param source: 控制asset returns数据来源：barra、wind
@@ -153,6 +153,7 @@ def GetAssetReturnsFromBarra(source='barra'):
         adj_prc['s_info_windcode'] = adj_prc['s_info_windcode'].str.slice_replace(6, repl='')
         # 计算股票日收益率，并调整量级
         asset_returns=adj_prc.set_index(['trade_dt','s_info_windcode']).T.pct_change().T['s_dq_adjclose'].sort_index()*100.0
+        # todo 待减去无风险收益率：法定存贷款利率、Shibor利率
         return asset_returns
 
 def GetAssetExposureFromBarra(factors='all'):
@@ -400,7 +401,7 @@ if __name__ is '__main__':
     specific_returns=GetSpecificReturnsFramBarra()
     factor_covariance=GetFactorCovarianceFromBarra()
     specific_risk=GetSpecificRiskFromBarra()
-    asset_returns=GetAssetReturnsFromBarra()
+    asset_returns=GetAssetReturnsFromBarraOrWind()
     asset_exposure=GetAssetExposureFromBarra()
     # 从wind数据库获取benchmark的权重数据
     benchmark_weights = GetBenchmarkWeightsFromWindDB(benchmark=benchmark)
