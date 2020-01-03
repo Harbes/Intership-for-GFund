@@ -1,5 +1,6 @@
 # 因子构建方式参见《20190620-渤海证券多因子模型研究系列之九：Barra风险模型(CNE6)之纯因子构建与因子合成》
-# todo 不同指标计算的股票池数量不同，最好能同意
+# todo 不同指标计算的股票池数量不同，最好能先统一股票池，然后对所有相关DataFrame进行reindex(columns=stock_pool)
+# todo 部分指标wind存在，但似乎不全
 import cx_Oracle
 import pymssql
 import pandas as pd
@@ -12,8 +13,11 @@ start_date='20191115';end_date='20191212'
 
 # 小工具
 def GenerateSqlOrder(cols,table_name,start_date=None,end_date=None):
-    # todo 注意：cols的顺序是‘交易日期，股票代码，核心变量’
+    '''
+    用于生成sql命令
+    # 注意：cols的顺序是‘交易日期，股票代码，核心变量’，下同。
     # 例如 'SELECT trade_dt,s_info_windcode,s_dq_mv from AShareEODDerivativeIndicator where (trade_dt>20191201) and (trade_dt<20191212)'
+    '''
     if start_date is None:
         if end_date is None:
             return 'SELECT ' + cols + ' from ' + table_name
@@ -25,7 +29,9 @@ def GenerateSqlOrder(cols,table_name,start_date=None,end_date=None):
         else:
             return 'SELECT '+cols+' from '+table_name+' where '+cols.split(',')[0]+' between '+start_date+' and '+end_date
 def GenerateDataframeFromWinddb(cols,table_name,start_date=None,end_date=None):
-    #cols='trade_dt,s_info_windcode,s_dq_mv';table_name='AShareEODDerivativeIndicator';
+    '''
+    从wind数据库读取数据，并转化成 T*N 的DataFrame
+    '''
     # 生成读取数据库的命令（字符串）
     sql_order=GenerateSqlOrder(cols,table_name,start_date,end_date)
     # 读取数据，并设置（交易日期，股票代码）为index
@@ -37,20 +43,24 @@ def GenerateDataframeFromWinddb(cols,table_name,start_date=None,end_date=None):
     data_df.columns=data_df.columns.droplevel()
     return data_df
 def GenerateWeightsFromHalflife(T,halflife=None):
+    '''
+    给定halflife参数，生成权重序列
+    '''
     if halflife is None:
         halflife=int(T/2)
     lam=0.5**(1.0/halflife)
     w=(1-lam)*lam**(np.arange(T))
     return w[::-1]/w.sum()
 def GenerateAlphaBetaFromWeightedTimeSeriesRegression(Y, X, halflife=None,output='beta'):
+    '''
+    单变量加权最小二乘，输出结果可以设置成截距项（alpha）或变量系数估计（beta）
+    '''
     Y = ret_stock.loc[t - DateOffset(months=12):t]
     X=ret_bench.loc[t - DateOffset(months=12):t]
-    halflife=63
     if halflife is None:
         w=pd.Series(1.0,index=Y.index)
     else:
         w=pd.Series(GenerateWeightsFromHalflife(len(Y),halflife=halflife),index=Y.index)*100.0
-    # todo 利用cov/var估计，权重施加在矩条件上，此时的权重是sqrt(w)
     X_=pd.concat([pd.Series(1.0,index=X.index),X],axis=1).mul(w,axis=0)
     Y_=Y.apply(lambda x:x.fillna(x.mean())).mul(w,axis=0)
     res=(np.linalg.inv(X_.T@X_)@X_.T@Y_)
@@ -59,28 +69,45 @@ def GenerateAlphaBetaFromWeightedTimeSeriesRegression(Y, X, halflife=None,output
     else:
         return res.iloc[0]
 def GenerateStdFromWeightedMovingAverate(X, halflife=None):
+    '''
+    利用WMA估计std
+    '''
     if halflife is None:
         w=pd.Series(1.0,index=X.index)
     else:
         w=pd.Series(GenerateWeightsFromHalflife(len(X),halflife=halflife),index=X.index)
-    return ((X-X.mean())**2.0).mul(w,axis=0).sum()
+    return np.sqrt(((X-X.mean())**2.0).mul(w,axis=0).sum())
 def GenerateMeanFromWeightedMovingAverage(X,halflife=None):
+    '''
+    利用WMA估计均值
+    '''
     # todo 以0填充还是以mean填充，当前选择是mean
     w=pd.Series(GenerateWeightsFromHalflife(len(X),halflife=halflife),index=X.index)
     return X.apply(lambda x:x.fillna(x.mean())).mul(w,axis=0).sum()
 def GenerateCummulativeRange(X):
+    '''
+    用于计算volatility类中的cumulative range指标
+    '''
     X_=X.fillna(0.0).cumsum()
     return X_.max()-X_.min()
 def GenerateSeasonalityReturns(X,date):
-    # todo 剔除当前年度的数据
-    return X.loc[(X.index.year<date.year)&(X.index.month==date.month)].sum()/5.0
+    '''
+    计算过去5年相同月份的平均收益率
+    '''
+    return X.loc[(X.index.year<date.year)&(X.index.month==date.month)].mean()
 def GetTradingCalendar():
+    '''
+    从wind数据库获取股市交易日历
+    '''
     sql_order='''
     SELECT trade_days from ASHARECALENDAR where S_INFO_EXCHMARKET = 'SSE'
     '''
     tc=pd.read_sql(sql_order,connect_winddb)
     return pd.to_datetime(tc['trade_days'],format='%Y%m%d').sort_values()
 def GetIndustryClassCITICS(trading_calendar,start_date,end_date):
+    '''
+    从wind获取中信一级行业分类
+    '''
     ind=pd.read_sql(GenerateSqlOrder('entry_dt,s_info_windcode,citics_ind_code','AShareIndustriesClassCITICS'),connect_winddb)
     # 获取一级行业分类
     ind['1st']=ind['citics_ind_code'].str.slice(2,4)
@@ -90,6 +117,13 @@ def GetIndustryClassCITICS(trading_calendar,start_date,end_date):
     # 使用resample、reindex以及多个ffill是避免：1、公布日期非交易日；2、避免resample只能到样本的最新日期
     return ind_.unstack().resample('D').ffill().ffill().reindex(trading_calendar).ffill().loc[start_date:end_date]
 def GenerateIndustryMomentum(X,g,w):
+    '''
+    计算行业动量
+    :param X: 个股相对强度
+    :param g: 行业分类
+    :param w: 权重，一般以自由流通市值的某种单调函数作为权重
+    :return:
+    '''
     assert (X.shape==g.shape) & (X.shape==w.shape)
     X_w=X*w
     ind_class = list(set(g.iloc[0].dropna()))
@@ -108,16 +142,24 @@ def GenerateIndustryMomentum(X,g,w):
 
 # 获取数据
 def GetDailyStockReturns(start_date, end_date):
+    '''
+    计算个股的日收益率
+    '''
     sql_order=GenerateSqlOrder('trade_dt,s_info_windcode,s_dq_adjpreclose,s_dq_adjclose','ashareeodprices',start_date,end_date)
     ret_stock=GenerateDataframeFromWinddb('trade_dt,s_info_windcode,s_dq_adjclose','ashareeodprices',str(int(start_date)-200),end_date).pct_change()[start_date:]
     return ret_stock.replace(0.0,np.nan)*100.0
 def GetBenchmarkReturns(start_date,end_date):
+    '''
+    沪深300指数日收益率
+    '''
     return GenerateDataframeFromWinddb('trade_dt,s_info_windcode,pct_chg','HS300IEODPrices',start_date,end_date)['000300.SH']
 
 # 计算因子
 # size
 def Generate_LogCap_MidCap(start_date,end_date):
-    # todo 非交易日（例如周末）数据也存在
+    '''
+    生成size类相关指标
+    '''
     # 生成 自由流通市值的DataFrame
     free_cap=GenerateDataframeFromWinddb('trade_dt,s_info_windcode,s_dq_mv','AShareEODDerivativeIndicator',start_date,end_date)
     # 剔除<=0.0的流通市值无效数据
@@ -129,6 +171,9 @@ def Generate_LogCap_MidCap(start_date,end_date):
 
 # volatility
 def Generate_Beta_HistSigma_DailyStd_CumRange(start_date,end_date):
+    '''
+    生成volatility类相关指标
+    '''
     ret_bench = GetBenchmarkReturns(str(int(start_date) - 10000), end_date)
     ret_stock = GetDailyStockReturns(str(int(start_date) - 10000), end_date)
     #ret_stock=ret_stock[ret_stock!=0.0]
@@ -143,6 +188,9 @@ def Generate_Beta_HistSigma_DailyStd_CumRange(start_date,end_date):
 
 # liquidity
 def Generate_STOM_STOQ_STOY_ATVR(start_date,end_date):
+    '''
+    liquidity类相关指标
+    '''
     turnover=GenerateDataframeFromWinddb('trade_dt,s_info_windcode,s_dq_freeturnover','AShareEODDerivativeIndicator',str(int(start_date)-10000),end_date)
     STOM=turnover.loc[start_date:].apply(lambda x:turnover.loc[x.name-DateOffset(months=1):x.name].mean(),axis=1)
     STOQ=turnover.loc[start_date:].apply(lambda x:turnover.loc[x.name-DateOffset(months=3):x.name].mean(),axis=1)
@@ -152,6 +200,9 @@ def Generate_STOM_STOQ_STOY_ATVR(start_date,end_date):
 
 # momentum
 def Generate_STRREV_Seasonality_IndMom(start_date,end_date):
+    '''
+    momentum类相关指标
+    '''
     ret_stock = GetDailyStockReturns(str(int(start_date) - 50100), end_date)
     ret_stock=ret_stock.replace(np.inf,np.nan)
     log_ret=np.log(ret_stock*0.01+1)
@@ -178,7 +229,10 @@ def Generate_STRREV_Seasonality_IndMom(start_date,end_date):
     return rev.replace(np.inf,np.nan)*100.0,seas[seas!=0.0],RS_S_6M,INDMOM,MOM,alpha
 
 # leverage
-#def Generate_MarketLev(start_date,end_date):
+def Generate_MarketLev(start_date,end_date):
+    '''
+    leverage类相关指标
+    '''
     # 获取总市值、优先股、长期负债数据
     ME=GenerateDataframeFromWinddb('trade_dt,s_info_windcode,s_val_mv','AShareEODDerivativeIndicator',start_date,end_date)
     # todo PE没找到
@@ -231,3 +285,5 @@ if __name__ is '__main__':
                                'database': 'NWindDB'}
     connect_winddb = ConnectSQLserver(options_winddb_datebase['server'], options_winddb_datebase['user'],
                                       options_winddb_datebase['password'], options_winddb_datebase['database'])
+
+
