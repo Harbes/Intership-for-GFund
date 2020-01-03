@@ -125,36 +125,25 @@ def GetFactorCovarianceFromBarra(factors='all'):
     factor_covariance.columns=factor_covariance.columns.droplevel()
     return factor_covariance
 
-def GetAssetReturnsFromBarraOrWind(source='barra'):
+def GetAssetReturnsFromBarra():
     '''
     从Barra数据库读取asset returns数据，或从wind数据库中生成asset returns数据
     :param source: 控制asset returns数据来源：barra、wind
     :return: (T*N)形式的series
     '''
-    if source.upper()=='BARRA':
-        # 从barra数据库中读取数据
-        sql_get_asset_returns = 'select TRADINGDATE,SECUCODE,DLYRETURN from BARRA_ASSETRET where TRADINGDATE BETWEEN ' + \
+    #if source.upper()=='BARRA':
+    # 从barra数据库中读取数据
+    sql_get_asset_returns = 'select TRADINGDATE,SECUCODE,DLYRETURN from BARRA_ASSETRET where TRADINGDATE BETWEEN ' + \
                              start_date + ' and ' + end_date
-        asset_returns = pd.read_sql(sql_get_asset_returns, connect_barra)
-        # 转化日期格式
-        asset_returns['TRADINGDATE']=pd.to_datetime(asset_returns['TRADINGDATE'],format='%Y%m%d')
-        # 设置（日期，股票代码）为index
-        asset_returns=asset_returns.set_index(['TRADINGDATE', 'SECUCODE']).sort_index()
-        # 剔除重复数据
-        asset_returns=asset_returns.loc[~asset_returns.index.duplicated(keep='last')]
-        return asset_returns['DLYRETURN']
-    else:
-        # 读取数据
-        sql_='select trade_dt,s_info_windcode,s_dq_adjpreclose,s_dq_adjclose from ashareeodprices where trade_dt between '+start_date+' and '+end_date
-        adj_prc=pd.read_sql(sql_,connect_winddb)
-        # 转化日期格式
-        adj_prc['trade_dt']=pd.to_datetime(adj_prc['trade_dt'],format='%Y%m%d')
-        # 剔除wind股票代码的后缀 SH、SZ
-        adj_prc['s_info_windcode'] = adj_prc['s_info_windcode'].str.slice_replace(6, repl='')
-        # 计算股票日收益率，并调整量级
-        asset_returns=adj_prc.set_index(['trade_dt','s_info_windcode']).T.pct_change().T['s_dq_adjclose'].sort_index()*100.0
-        # todo 待减去无风险收益率：法定存贷款利率、Shibor利率
-        return asset_returns
+    asset_returns = pd.read_sql(sql_get_asset_returns, connect_barra)
+    # 转化日期格式
+    asset_returns['TRADINGDATE']=pd.to_datetime(asset_returns['TRADINGDATE'],format='%Y%m%d')
+    # 设置（日期，股票代码）为index
+    asset_returns=asset_returns.set_index(['TRADINGDATE', 'SECUCODE']).sort_index()
+    # 剔除重复数据
+    asset_returns=asset_returns.loc[~asset_returns.index.duplicated(keep='last')]
+    return asset_returns['DLYRETURN']
+
 
 def GetAssetExposureFromBarra(factors='all'):
     '''
@@ -401,7 +390,7 @@ if __name__ is '__main__':
     specific_returns=GetSpecificReturnsFramBarra()
     factor_covariance=GetFactorCovarianceFromBarra()
     specific_risk=GetSpecificRiskFromBarra()
-    asset_returns=GetAssetReturnsFromBarraOrWind()
+    asset_returns=GetAssetReturnsFromBarra()
     asset_exposure=GetAssetExposureFromBarra()
     # 从wind数据库获取benchmark的权重数据
     benchmark_weights = GetBenchmarkWeightsFromWindDB(benchmark=benchmark)
@@ -477,14 +466,14 @@ if __name__ is '__main__':
         res=pd.DataFrame(np.nan,index=['cumReturn','cumReturn_barra','SpecificReturn','SpecificReturn_adjusted','FactorReturn','StyleFactorReturn','IndustryFactorReturn','CountryFactorReturn','TotalRisk','CommonFactorRisk','ResidualRisk'],
                      columns=list(portfolio_returns.columns)+list([benchmark]))
         res.loc['cumReturn']=\
-            np.hstack((portfolio_returns.loc[start_date:end_date].sum(),benchmark_return.loc[start_date:end_date].sum()))# 直接使用port_ret可能会导致分解不成立
+            np.hstack((portfolio_returns.loc[start_date:end_date].sum(),benchmark_return.loc[start_date:end_date].sum()))
         res.loc['SpecificReturn']=np.hstack((portfolio_specific_return.loc[start_date:end_date].sum(),benchmark_specific_return.loc[start_date:end_date].sum()))
         res.loc['StyleFactorReturn']=np.hstack((portfolio_style_factor_return.loc[start_date:end_date].sum(),benchmark_style_factor_return.loc[start_date:end_date].sum()))
         res.loc['IndustryFactorReturn']=np.hstack((portfolio_industry_factor_return.loc[start_date:end_date].sum(),benchmark_industry_factor_return.loc[start_date:end_date].sum()))
         res.loc['CountryFactorReturn']=np.hstack((portfolio_country_factor_return.loc[start_date:end_date].sum(),benchmark_country_factor_return.loc[start_date:end_date].sum()))
         res.loc['FactorReturn']=res.loc[['StyleFactorReturn','IndustryFactorReturn','CountryFactorReturn']].sum()
         res.loc['cumReturn_barra']=res.loc['FactorReturn']+res.loc['SpecificReturn']
-        res.loc['SpecificReturn_adjusted']=res.loc['cumReturn']-res.loc['cumReturn_barra']+res.loc['SpecificReturn']
+        #res.loc['SpecificReturn_adjusted']=res.loc['cumReturn']-res.loc['cumReturn_barra']+res.loc['SpecificReturn']
         res.loc['CommonFactorRisk']=np.hstack((portfolio_factor_risk.loc[start_date:end_date].iloc[-1],np.nan))
         res.loc['ResidualRisk']=np.hstack((portfolio_specific_risk.loc[start_date:end_date].iloc[-1],np.nan))
         res.loc['TotalRisk']=np.sqrt((res.loc[['CommonFactorRisk','ResidualRisk']]**2.0).sum()).replace(0.0,np.nan)

@@ -156,3 +156,16 @@ A=np.arange(1,10).reshape(3,3)
 D=np.sqrt(np.diag(1/np.diag(A)));D
 D@A@D
 A
+
+else:
+# 读取数据
+sql_ = 'select trade_dt,s_info_windcode,s_dq_adjpreclose,s_dq_adjclose from ashareeodprices where trade_dt between ' + start_date + ' and ' + end_date
+adj_prc = pd.read_sql(sql_, connect_winddb)
+# 转化日期格式
+adj_prc['trade_dt'] = pd.to_datetime(adj_prc['trade_dt'], format='%Y%m%d')
+# 剔除wind股票代码的后缀 SH、SZ
+adj_prc['s_info_windcode'] = adj_prc['s_info_windcode'].str.slice_replace(6, repl='')
+# 计算股票日收益率，并调整量级
+asset_returns = adj_prc.set_index(['trade_dt', 's_info_windcode']).T.pct_change().T[
+                    's_dq_adjclose'].sort_index() * 100.0
+# todo 待减去无风险收益率：法定存贷款利率、Shibor利率
